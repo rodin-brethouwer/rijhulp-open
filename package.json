@@ -1,0 +1,13 @@
+{
+  "name": "rijhulp-open",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "(MIT AND CC-BY-4.0)",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "test": "node referentie/test/meldingen.mjs && node referentie/test/feed.mjs && node referentie/test/limiet.mjs && node referentie/test/afrit.mjs && node referentie/test/adapters.mjs && node referentie/test/msi.mjs",
+    "lokaal": "node referentie/scripts/lokaal.mjs 8787",
+    "start": "node referentie/scripts/lokaal.mjs"
+  }
+}

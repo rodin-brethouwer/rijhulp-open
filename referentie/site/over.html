@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>Over de rijhulp</title>
+<link rel="stylesheet" href="rijhulp.css">
+<style>body{max-width:44rem;margin:0 auto;padding:1.5rem 1rem;line-height:1.5}</style>
+</head>
+<body>
+<!-- Sjabloon: vul de beheerder en het contact in. -->
+<h1>Over de rijhulp</h1>
+<p>Een gratis rijhulp voor de browser in de auto: je snelheid uit de GPS, de maximumsnelheid van de weg, en een melding vooraf bij vaste flitsers, trajectcontroles en gemelde flitsers. De borden langs de weg gaan altijd voor: de kaart kan achterlopen of fout zijn.</p>
+
+<h2>Beheerder</h2>
+<p>[Naam van de beheerder], [contact]. De beheerder is verantwoordelijk voor deze app. Deze app volgt het open protocol rijhulp-open.</p>
+
+<h2>Landen</h2>
+<p>Flitsers staan alleen aan in landen waar waarschuwen ervoor mag, volgens de standaard landregels van rijhulp-open (<a href="data/landen.json">data/landen.json</a>). In elk ander land staat de laag uit.</p>
+
+<h2>Bronnen en licenties</h2>
+<ul>
+  <li>Wegen, maximumsnelheden, flitsers, trajectcontroles en grenzen: &copy; <a href="https://www.openstreetmap.org/copyright" rel="noopener">OpenStreetMap-bijdragers</a>, onder de <a href="https://opendatacommons.org/licenses/odbl/" rel="noopener">Open Database License (ODbL)</a>. De bestanden in <a href="data/">data/</a> en <a href="kaart/index.json">kaart/</a> zijn afgeleide databases onder dezelfde licentie.</li>
+  <li>Matrixborden boven de snelweg in Nederland (de limiet en de rode kruizen die er nu staan): open data van <a href="https://www.ndw.nu" rel="noopener">NDW</a>, onder <a href="https://creativecommons.org/publicdomain/zero/1.0/deed.nl" rel="noopener">CC0 1.0</a> volgens de <a href="https://docs.ndw.nu/algemeen/data-gebruiksvoorwaarden/" rel="noopener">gebruiksvoorwaarden open data</a>. NDW levert de data zoals hij is en staat niet in voor juistheid of beschikbaarheid. Een getal met rode rand gaat voor de vaste limiet tot het volgende portaal; zonder rode rand is het een advies.</li>
+  <li>Waar geen vooraf gemaakte kaart is, haalt de app een stukje kaart live op bij de <a href="https://overpass-api.de" rel="noopener">Overpass API</a>.</li>
+  <li>De gesproken zinnen zijn vooraf gemaakt met [dienst], want de browser in de auto heeft geen eigen stem.</li>
+</ul>
+<p>Iets fout of ontbreekt een flitser? Pas het aan op <a href="https://www.openstreetmap.org" rel="noopener">openstreetmap.org</a>.</p>
+
+<h2>Privacy</h2>
+<p>Je positie blijft in deze browser, behalve op het moment dat je zelf een flitser meldt: dan gaan die plek en je rijrichting naar de server van deze app. Er is geen account. De server bewaart geen IP-adres en geen toestel-id, alleen een hash daarvan met een sleutel die elke dag nieuw is en daarna verdwijnt. Een melding en de stemmen erop zijn een dag na het verlopen weg. Andere apps zien een melding alleen afgerond op ca. 11 meter, zonder iets over de melder.</p>
+<p>Gemelde flitsers haalt de browser op per vak van ca. 20 bij 20 km, zonder je positie.</p>
+<p><a href="./">Terug naar de rijhulp</a></p>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "bron": "Verzonnen rechthoeken voor de test, geen echte grenzen",
+  "landen": {
+    "NL": [[51.3, 3.6, 53.5, 3.6, 53.5, 7.2, 51.3, 7.2, 51.3, 3.6]],
+    "BE": [[50.7, 2.6, 51.3, 2.6, 51.3, 5.9, 50.7, 5.9, 50.7, 2.6]]
+  }
+}

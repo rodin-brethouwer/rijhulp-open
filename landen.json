@@ -1,0 +1,25 @@
+{
+  "versie": "0.1",
+  "stand": "2026-10-25",
+  "uitleg": "Standaard landregels voor de flitslaag (vaste en gemelde flitsers). aan = de laag mag aan; uit = de laag staat uit, ook voor meldingen van andere apps. Een land dat hier niet in staat, staat uit. Dit is geen juridisch advies; elke beheerder controleert zelf de wet in de landen waar zijn app werkt.",
+  "standaard": "uit",
+  "landen": {
+    "NL": { "flitsers": "aan", "toelichting": "Waarschuwen voor flitsers in een app of navigatie mag; radardetectie is verboden.", "bronnen": ["anwb", "adac"] },
+    "BE": { "flitsers": "aan", "toelichting": "Waarschuwen voor flitsers in een app of navigatie mag; radardetectie is verboden.", "bronnen": ["anwb", "adac"] },
+    "IT": { "flitsers": "aan", "toelichting": "Flitsapps mogen volgens de ANWB; radardetectie is verboden.", "bronnen": ["anwb", "adac"] },
+    "ES": { "flitsers": "aan", "toelichting": "Flitsapps mogen volgens de ANWB; POI-waarschuwing in navigatie mag volgens de ADAC; radardetectie en stoorzenders zijn verboden.", "bronnen": ["anwb", "adac"] },
+    "AT": { "flitsers": "uit", "toelichting": "Staat uit omdat de bronnen elkaar tegenspreken: volgens de ADAC mag een POI-waarschuwing als aankondiging, volgens de ANWB (in Hart van Nederland) zijn flitsapps in Oostenrijk verboden. Radardetectie is verboden. Pas aan als een duidelijke bron zegt dat waarschuwen mag.", "bronnen": ["adac", "anwb", "hvn"], "nalopen": true },
+    "DE": { "flitsers": "uit", "toelichting": "Paragraaf 23 lid 1c StVO verbiedt apps en apparaten die voor flitsers waarschuwen, ook voor de bijrijder.", "bronnen": ["adac", "hvn"] },
+    "CH": { "flitsers": "uit", "toelichting": "Waarschuwen voor controles is verboden; volgens de ANWB mag de app niet eens op de telefoon staan.", "bronnen": ["hvn", "flitsmeister"] },
+    "FR": { "flitsers": "uit", "toelichting": "Alleen algemene gevarenzones mogen; een directe waarschuwing voor de plek van een flitser niet.", "bronnen": ["adac", "hvn"] },
+    "CY": { "flitsers": "uit", "toelichting": "Alle systemen die voor flitsers waarschuwen zijn verboden.", "bronnen": ["flitsmeister"] },
+    "TR": { "flitsers": "uit", "toelichting": "Alle systemen die voor flitsers waarschuwen zijn verboden.", "bronnen": ["flitsmeister"] },
+    "MK": { "flitsers": "uit", "toelichting": "Alle systemen die voor flitsers waarschuwen zijn verboden.", "bronnen": ["flitsmeister"] }
+  },
+  "bronnen": {
+    "adac": { "titel": "ADAC, Radarwarner und Blitzer-Apps in Deutschland und im Ausland (landentabel stand 5/2025, artikel van 9 juli 2026)", "url": "https://www.adac.de/verkehr/recht/verkehrsvorschriften-deutschland/radarwarner", "geraadpleegd": "2026-10-25" },
+    "anwb": { "titel": "ANWB, verbod op navigatie en radardetectie in het buitenland", "url": "https://www.anwb.nl/rechtshulp/op-vakantie/met-de-auto-op-reis/verbod-navigatie", "geraadpleegd": "2026-10-25" },
+    "hvn": { "titel": "Hart van Nederland, flitsapps op vakantie in het buitenland (met uitspraken van de ANWB)", "url": "https://www.hartvannederland.nl/advies-en-tips/waarschuwen/artikelen/flitsapps-app-verkeer-flitsmeister-vakantie-buitenland-autorijden", "geraadpleegd": "2026-10-25" },
+    "flitsmeister": { "titel": "Flitsmeister helpcentrum, waar mag je Flitsmeister gebruiken", "url": "https://help.flitsmeister.com/hc/nl/articles/23814123553692", "geraadpleegd": "2026-10-25" }
+  }
+}
