@@ -1,0 +1,15 @@
+.DS_Store
+node_modules/
+referentie/data-bron/
+referentie/site/kaart/
+referentie/site/data/
+referentie/site/geluid/
+referentie/site/sim/
+referentie/site/msi/
+referentie/server/msi-vakken.json
+*.osm.pbf
+*.wav
+*.opus
+.env*
+*.key
+*sleutel*.txt
