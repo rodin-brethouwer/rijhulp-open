@@ -28,7 +28,8 @@ Een vak heeft een sleutel `<i>_<j>` met
     j = floor(lon / 0.3)
 
 Voorbeeld: Bleiswijk (52.0262, 4.5349) ligt in vak `260_15`. Negatieve getallen mogen
-(`-171_-2`). Dit is dezelfde indeling als de kaartvakken van de referentie-implementatie (10 x 10
+(`-171_-2`). Zonder voorloopnullen: een server HOORT `0260_015` te lezen als `260_15` (en zo in
+het antwoord te zetten), zodat elke schrijfwijze van een vak in dezelfde cache valt. Dit is dezelfde indeling als de kaartvakken van de referentie-implementatie (10 x 10
 tegels van 0,02 x 0,03 graad). Een app die een vak vraagt, vraagt het vak onder de auto en de
 buurvakken waar de auto binnen enkele kilometers in rijdt.
 
@@ -106,11 +107,14 @@ gebruikt ze, `REGELS` in `referentie/server/server.mjs`):
 
 - Een nieuwe melding leeft 3 uur.
 - Elke ja: de melding geldt nog minstens 2 uur vanaf die ja, maar nooit langer dan 8 uur na `gemaakt`.
-- Een nee: de melding geldt hooguit nog 30 minuten. Twee of meer nee en meer nee dan ja: meteen weg.
+- Een nee: de melding geldt hooguit nog 30 minuten. Nee van twee of meer verschillende IP-hashes
+  en meer nee dan ja: meteen weg. Tien nee van één IP tellen hiervoor als één.
 - Een nieuwe melding binnen 200 m van een bestaande, met een koers die minder dan 60 graden afwijkt,
   is geen nieuwe melding maar een ja op de bestaande. Dat geldt ook over apps heen: een lezer HOORT
   meldingen van verschillende apps op die manier samen te voegen voordat hij waarschuwt.
-- Eén stem per toestel per melding. De melder zelf stemt pas als zijn melding minstens 20 minuten
+- Eén stem per toestel per melding. Het toestel-id geeft de server uit (ondertekend), niet de
+  client; een stem van een id dat vandaag is uitgegeven telt niet mee voor het meteen weghalen.
+  De melder zelf stemt pas als zijn melding minstens 20 minuten
   oud is; zijn nee haalt zijn eigen melding meteen weg.
 - Een lezer telt de stemmen van een melding op uit de eigen feed van de melder plus de `stemmen` uit
   de andere feeds die hij vertrouwt.
@@ -168,8 +172,16 @@ Voor wie een feed leest:
 
 Voor wie meldingen aanneemt van eigen gebruikers (aanbevolen, zoals de referentie):
 
+- alleen POST met `Content-Type: application/json` (anders `415`) en zonder vreemde `Origin` of
+  `Sec-Fetch-Site` (anders `403`): een POST met `text/plain` gaat zonder preflight, en dan kan elke
+  andere site zijn bezoekers voor je laten melden of stemmen;
+- toestel-ids alleen van de server (ondertekend, met de dag van uitgifte), hooguit 5 per IP per
+  dag; een id van vandaag meldt hooguit 2 keer;
 - per toestel niet twee meldingen binnen 5 minuten en hooguit 8 per dag;
 - per vingerafdruk (gehasht IP plus browser) hooguit 6 per 10 minuten en 60 per dag;
+- per IP (gehasht, zonder browser) hooguit 10 meldingen per uur en 30 per dag, en per /24 (IPv4)
+  of /48 (IPv6) 30 per uur en 100 per dag: toestel-id en browser kiest de client zelf;
+- per IP hooguit 30 stemmen per uur, per /24 of /48 hooguit 100;
 - een melding alleen met een GPS-nauwkeurigheid van 100 m of beter;
 - alleen in landen die aan staan.
 

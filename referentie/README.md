@@ -19,3 +19,11 @@ Wat niet in de repo staat en wat je zelf bouwt (zie RECEPT.md): `site/kaart/`, `
 
 Snel proberen: `npm test` in de wortel, daarna `npm run lokaal` (na het bouwen van de data).
 `scripts/lokaal.mjs` is ook de server voor Node in productie; zie de README, "Andere routes".
+
+Tegen misbruik (sinds 26 okt 2026): de server neemt alleen POST aan met `Content-Type:
+application/json` en zonder vreemde `Origin`, geeft zelf de toestel-ids uit (`POST /api/toestel`,
+ondertekend met een sleutel in de tabel `sleutel`), en telt limieten per IP-hash en per /24 of /48.
+Draai je `scripts/lokaal.mjs` achter een proxy, zet dan `RIJHULP_PROXY=1` (anders hebben alle
+bezoekers het IP van de proxy en raken ze samen de limiet) en `RIJHULP_HERKOMST=https://jouw.site`
+(anders weigert de server elke POST van de echte site met 403). Achter Cloudflare komt het IP uit
+`cf-connecting-ip`.

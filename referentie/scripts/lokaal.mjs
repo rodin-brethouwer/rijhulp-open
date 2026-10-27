@@ -32,13 +32,17 @@ if (process.env.DATABASE_URL) {
   DB = sqliteDb(process.argv[3] || process.env.RIJHULP_DB || ":memory:");
   migreer(DB);
 }
-const env = { DB, APP_ID: process.env.APP_ID, FEED_SLEUTEL: process.env.FEED_SLEUTEL };
+// HERKOMST: achter een proxy de echte origin van de site (komma's voor meer); zonder die geldt alleen
+// http://localhost:<poort>, en weigert de server een POST van een andere herkomst met 403.
+const env = { DB, APP_ID: process.env.APP_ID, FEED_SLEUTEL: process.env.FEED_SLEUTEL, HERKOMST: process.env.RIJHULP_HERKOMST };
 const grenzen = JSON.parse(fs.readFileSync(new URL("../site/data/grenzen.json", import.meta.url))).landen;
 let plus = 0; // de verschuiving van de klok voor een proef (RIJHULP_KLOK=1)
 // Matrixborden (NL): alleen als scripts/bouw-msi.mjs server/msi-vakken.json heeft gemaakt.
 const msiPad = new URL("../server/msi-vakken.json", import.meta.url);
 const msiVakken = fs.existsSync(msiPad) ? JSON.parse(fs.readFileSync(msiPad)) : null;
 const server = maakServer({ grenzen, nu: () => Date.now() + plus, msiVakken });
+// Opruimen ook zonder nieuwe meldingen: elk uur, zoals OPRUIMEN_CRON bij een host met cron.
+setInterval(() => { server.scheduled({}, env).catch((e) => console.error("opruimen", e && e.message)); }, 3600e3).unref();
 const wortel = new URL("../site/", import.meta.url).pathname;
 const TYPE = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".txt": "text/plain" };
 

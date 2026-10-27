@@ -4,7 +4,7 @@
 // met een nieuwe stand, en dan is de URL anders. Overpass gaat niet via de cache: die
 // tegels bewaart de app zelf in IndexedDB. /api/ (de gemelde
 // flitsers en de matrixborden) gaat nooit via deze cache.
-var CACHE = "rijhulp-v8"; // ophogen bij elke wijziging van de app: dan herlaadt een open startscherm vanzelf
+var CACHE = "rijhulp-v11"; // ophogen bij elke wijziging van de app: dan herlaadt een open startscherm vanzelf
 var KAART = "kaart-v1";
 var BESTANDEN = ["./", "index.html", "rijhulp.css", "over.html", "js/geo.js", "js/sim.js", "js/geluid.js", "js/kaart.js", "js/flitsers.js", "js/gemeld.js", "js/matrix.js", "js/motor.js", "js/rijhulp.js", "data/flitsers.json", "data/grenzen.json", "data/landen.json", "geluid/nl.json", "geluid/en.json", "kaart/index.json", "msi/index.json"];
 self.addEventListener("install", function (e) {

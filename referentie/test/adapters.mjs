@@ -8,7 +8,9 @@ import { postgresDb, naarPostgres } from "../server/adapters/postgres.mjs";
 
 // node:sqlite
 const db = sqliteDb(":memory:");
-assert.deepEqual(migreer(db), ["0001_meldingen.sql"]);
+assert.deepEqual(migreer(db), ["0001_meldingen.sql", "0002_ip_en_toestel.sql"]);
+assert.deepEqual(migreer(db), ["0001_meldingen.sql", "0002_ip_en_toestel.sql"], "nog een keer migreren gaat goed (ADD COLUMN die er al is)");
+assert.equal(db.sql.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('stemmen') WHERE name IN ('ip', 'vers')").get().n, 2);
 const nieuw = await db.prepare("INSERT INTO meldingen (lat, lon, koers, gemaakt, verloopt, melder) VALUES (?, ?, ?, ?, ?, ?) RETURNING *").bind(52.1, 4.5, 10, 1, 2, "x").first();
 assert.equal(nieuw.id, 1);
 assert.equal(await db.prepare("SELECT koers FROM meldingen WHERE id = ?").bind(1).first("koers"), 10);

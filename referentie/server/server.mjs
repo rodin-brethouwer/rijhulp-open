@@ -16,6 +16,7 @@
 // GET  /api/meldingen?vak=<lat>_<lon>       actieve meldingen in een kaartvak (0,2 x 0,3 graad), voor de eigen app
 // POST /api/meldingen                       { toestel, lat, lon, koers, nauwkeurig }
 // POST /api/meldingen/<id>/stem             { toestel, ja: true|false }
+// POST /api/toestel                         {}  -> { toestel }: een ondertekend toestel-id van de server
 // GET  /feed?vak=<lat>_<lon>                de feed voor andere apps volgens PROTOCOL.md (versie 0.1),
 //                                           ondertekend met Ed25519 als env.FEED_SLEUTEL er is; ook als
 //                                           /api/feed, voor hosts die alleen /api naar de server sturen
@@ -24,6 +25,13 @@
 // geheime sleutel als PKCS8 in base64url, uit scripts/maak-sleutel.mjs; zet hem als geheim bij je
 // host, nooit in de repo). De grenzen van de landen die aan staan (site/data/grenzen.json) zet je
 // bij het bundelen als const GRENZEN boven deze code, of je geeft ze mee aan maakServer.
+//
+// Opruimen (oude meldingen, stemmen, de gehashte codes en het dagzout van gisteren) gebeurt bij
+// elke nieuwe melding en via scheduled(): laat je host die elk uur aanroepen (OPRUIMEN_CRON, een
+// cron trigger, of setInterval in Node zoals scripts/lokaal.mjs), anders blijven die gegevens
+// staan zolang er geen nieuwe melding komt.
+
+export const OPRUIMEN_CRON = "0 * * * *"; // elk uur, in UTC
 
 export const VAK_LAT = 0.2, VAK_LON = 0.3; // gelijk aan de kaartvakken (10 x 10 tegels van 0,02 x 0,03)
 export const REGELS = {
@@ -38,10 +46,43 @@ export const REGELS = {
   perVingerTienMin: 6, // een vingerafdruk (IP plus browser) deelt een auto met veel anderen achter hetzelfde mobiele IP
   perVingerDag: 60,
   stemmenPerToestelDag: 200,
+  // Security-review 26 okt 2026 (H1, H2): ook per IP-hash en per net (/24 of /48), los van het
+  // toestel-id en de browser, want die kiest de client zelf. Een gedeeld mobiel IP raakt dit
+  // eerder; dat is de prijs.
+  perIpUur: 10,
+  perIpDag: 30,
+  perNetUur: 30,
+  perNetDag: 100,
+  stemmenPerIpUur: 30,
+  stemmenPerNetUur: 100,
   eigenNaMin: 20, // de melder stemt pas op zijn eigen melding als die minstens zo oud is
   eigenTussenMin: 20, // en daarna hooguit eens per zoveel minuten (een ja telt als elke ja, een nee haalt hem weg)
   cacheS: 15,
+  toestellenPerIpDag: 5, // H1: de server geeft toestel-ids uit, hooguit zoveel per IP-hash per dag
+  toestellenPerNetDag: 30,
+  versPerDag: 2, // een toestel-id van vandaag meldt hooguit zo vaak, en zijn nee haalt niets meteen weg
+  toestelDagen: 365, // daarna vraagt de app een nieuw id
+  apiPerIpMin: 240, // M1: alle /api-verzoeken per IP per minuut, in deze isolate (een auto doet er ca. 6)
 };
+
+/** M1: een vak in één schrijfwijze ("0260_016" wordt "260_16"), of null. Alleen echte vakken op aarde. */
+export function leesVak(s) {
+  const m = /^(-?\d{1,4})_(-?\d{1,4})$/.exec(s || "");
+  if (!m) return null;
+  const a = Number(m[1]), b = Number(m[2]);
+  if (a < -450 || a >= 450 || b < -600 || b >= 600) return null;
+  return { a, b, vak: a + "_" + b };
+}
+/** De vakken waar meldingen kunnen staan: de omhullende van de grenzen, met een vak marge. */
+export function vakBereik(grenzen) {
+  if (!grenzen) return null;
+  let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+  for (const cc of Object.keys(grenzen)) for (const l of grenzen[cc]) for (let j = 0; j < l.length; j += 2) {
+    a0 = Math.min(a0, Math.floor(l[j] / VAK_LAT)); a1 = Math.max(a1, Math.floor(l[j] / VAK_LAT));
+    b0 = Math.min(b0, Math.floor(l[j + 1] / VAK_LON)); b1 = Math.max(b1, Math.floor(l[j + 1] / VAK_LON));
+  }
+  return Number.isFinite(a0) ? { a0, a1, b0, b1 } : null;
+}
 
 const R = 6371000, rad = Math.PI / 180;
 export function afstand(aLat, aLon, bLat, bLon) {
@@ -60,6 +101,22 @@ export function binnen(lat, lon, lijnen) {
   }
   return telling % 2 === 1;
 }
+/** Het net van een IP-adres: /24 bij IPv4, /48 bij IPv6 (ook ::ffff:a.b.c.d telt als IPv4). */
+export function netVan(ip) {
+  if (!ip) return "";
+  const v4 = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/.exec(ip);
+  if (v4) return v4[1] + "." + v4[2] + "." + v4[3];
+  const [kop, staart] = ip.toLowerCase().split("::");
+  const a = kop ? kop.split(":") : [];
+  const b = staart == null ? [] : staart ? staart.split(":") : [];
+  const groepen = staart == null ? a : [...a, ...Array(Math.max(0, 8 - a.length - b.length)).fill("0"), ...b];
+  return groepen.slice(0, 3).map((g) => parseInt(g || "0", 16).toString(16)).join(":");
+}
+/** Het IP van de bezoeker: cf-connecting-ip achter Cloudflare, anders x-real-ip zoals
+ *  scripts/lokaal.mjs het zelf zet (die wist wat de client meestuurt; achter een eigen proxy alleen
+ *  met RIJHULP_PROXY=1). Zet je de server zelf achter een andere host, zorg dan dat de client deze
+ *  headers niet zelf kan kiezen, anders werken de limieten per IP niet. */
+export function ipVan(req) { return req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || ""; }
 export function vakVan(lat, lon) { return Math.floor(lat / VAK_LAT) + "_" + Math.floor(lon / VAK_LON); }
 
 function antwoord(status, body, extra) {
@@ -74,6 +131,29 @@ async function sha(tekst) {
 function willekeurig() { const b = new Uint8Array(32); crypto.getRandomValues(b); return [...b].map((x) => x.toString(16).padStart(2, "0")).join(""); }
 
 const TOESTEL = /^[A-Za-z0-9_-]{16,64}$/;
+// H1: het toestel-id geeft de server uit (POST /api/toestel): "b", de dag van uitgifte (dagen sinds
+// 1970, UTC), 16 hex willekeurig en 24 hex HMAC-SHA256 met een sleutel in de eigen database. Een id
+// dat de client zelf verzint, wordt geweigerd. Het id zelf wordt nergens bewaard.
+const TOESTEL_SERVER = /^b(\d{5})([0-9a-f]{16})([0-9a-f]{24})$/;
+const dagNr = (t) => Math.floor(t / 86400e3);
+
+// Security-review 26 okt 2026 (H3): een schrijfverzoek alleen als JSON en alleen van de eigen site.
+// Een POST met text/plain is een "simple request" zonder preflight: zonder deze controle kan elke
+// andere site zijn bezoekers onzichtbaar laten melden of stemmen.
+// Zonder lijst geldt alleen de origin van het verzoek zelf. Achter een proxy (scripts/lokaal.mjs
+// ziet http://localhost) geef je de echte herkomst op: env.HERKOMST="https://jouw.site" (komma's
+// voor meer), of opties.herkomsten.
+export const EIGEN_HERKOMST = [];
+/** null als het verzoek mag, anders het antwoord (415 of 403). */
+export function poortSchrijven(req, url, herkomsten = EIGEN_HERKOMST) {
+  const type = (req.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  if (type !== "application/json") return fout(415, "type");
+  const herkomst = req.headers.get("origin");
+  if (herkomst != null && herkomst !== url.origin && !herkomsten.includes(herkomst)) return fout(403, "herkomst");
+  const site = req.headers.get("sec-fetch-site");
+  if (site != null && site !== "same-origin") return fout(403, "herkomst");
+  return null;
+}
 
 // ---------- Matrixborden (MSI) van NDW ----------
 // De feed (open data van NDW, CC0 1.0) is één bestand voor heel Nederland, elke minuut nieuw,
@@ -146,7 +226,16 @@ export function maakServer(opties = {}) {
   const grenzen = opties.grenzen;
   const msiVakken = opties.msiVakken || null; // { idLengte, vakken: { vak: "id,id,..." } }
   if (msiVakken && msiVakken.idLengte) MSI_ID_LENGTE = msiVakken.idLengte;
-  const msiIds = new Map(); // vak -> [id, ...], pas bij de eerste vraag naar dat vak
+  const msiIds = new Map(); // vak -> [id, ...], pas bij de eerste vraag naar dat vak; alleen vakken uit msiVakken
+  const bereik = vakBereik(grenzen);
+  const perIp = new Map(); // ip -> { m: minuut, n }: de eenvoudige limiet op /api, alleen in het geheugen
+  function teVeel(req) {
+    const ip = ipVan(req);
+    const m = Math.floor(nu() / 60e3);
+    let r = perIp.get(ip);
+    if (!r || r.m !== m) { if (perIp.size > 20000) perIp.clear(); r = { m, n: 0 }; perIp.set(ip, r); }
+    return ++r.n > (opties.apiPerIpMin || REGELS.apiPerIpMin);
+  }
   const msi = { data: null, bezig: null, fout: 0 };
   const doeFetch = opties.fetch || ((u, i) => fetch(u, i));
   const geheugen = new Map(); // vak -> { t, body }: in deze isolate, naast de Cache API
@@ -158,6 +247,43 @@ export function maakServer(opties = {}) {
     return false;
   }
 
+  let hmacSleutel = null;
+  async function idSleutel(db) {
+    if (hmacSleutel) return hmacSleutel;
+    await db.prepare("INSERT OR IGNORE INTO sleutel (naam, waarde) VALUES ('toestel', ?)").bind(willekeurig()).run();
+    const rij = await db.prepare("SELECT waarde FROM sleutel WHERE naam = 'toestel'").first();
+    const ruw = new Uint8Array(rij.waarde.match(/../g).map((h) => parseInt(h, 16)));
+    hmacSleutel = await crypto.subtle.importKey("raw", ruw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    return hmacSleutel;
+  }
+  async function tekenId(db, tekst) {
+    const b = await crypto.subtle.sign("HMAC", await idSleutel(db), new TextEncoder().encode(tekst));
+    return [...new Uint8Array(b)].slice(0, 12).map((x) => x.toString(16).padStart(2, "0")).join("");
+  }
+  /** { dag, vers } voor een geldig, door deze server uitgegeven id; anders null. */
+  async function keurToestel(db, id, t) {
+    const m = typeof id === "string" ? TOESTEL_SERVER.exec(id) : null;
+    if (!m) return null;
+    const dag = Number(m[1]), vandaag = dagNr(t);
+    if (dag > vandaag || vandaag - dag > REGELS.toestelDagen) return null;
+    const verwacht = await tekenId(db, m[1] + m[2]);
+    let verschil = 0;
+    for (let i = 0; i < 24; i++) verschil |= verwacht.charCodeAt(i) ^ m[3].charCodeAt(i);
+    return verschil === 0 ? { dag, vers: dag === vandaag } : null;
+  }
+  async function geefToestel(req, env) {
+    const b = await leesBody(req);
+    if (!b) return fout(400, "body");
+    const db = env.DB, t = nu();
+    const w = await wie(req, db, "", t);
+    const tel = async (kolom, waarde) => Number((await db.prepare(`SELECT COUNT(*) AS n FROM acties WHERE soort = 'toestel' AND ${kolom} = ? AND t > ?`).bind(waarde, t - 24 * 3600e3).first()).n);
+    if ((await tel("ip", w.ip)) >= REGELS.toestellenPerIpDag || (await tel("net", w.net)) >= REGELS.toestellenPerNetDag) return fout(429, "dag_vol");
+    const dag = String(dagNr(t)).padStart(5, "0"), r = willekeurig().slice(0, 16);
+    const id = "b" + dag + r + (await tekenId(db, dag + r));
+    await db.prepare("INSERT INTO acties (soort, toestel, vinger, t, ip, net) VALUES ('toestel', ?, ?, ?, ?, ?)").bind(await sha("uitgifte|" + id), w.vinger, t, w.ip, w.net).run();
+    return antwoord(201, { toestel: id });
+  }
+
   async function zout(db, t) {
     const dag = new Date(t).toISOString().slice(0, 10);
     await db.prepare("INSERT OR IGNORE INTO zout (dag, waarde) VALUES (?, ?)").bind(dag, willekeurig()).run();
@@ -166,10 +292,10 @@ export function maakServer(opties = {}) {
   }
   async function wie(req, db, toestel, t) {
     const z = await zout(db, t);
-    const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || "";
+    const ip = ipVan(req);
     const ua = (req.headers.get("user-agent") || "").slice(0, 200);
     // Het IP gaat alleen door de hash en wordt nergens bewaard.
-    return { toestel: await sha(z + "|t|" + toestel), vinger: await sha(z + "|v|" + ip + "|" + ua) };
+    return { toestel: await sha(z + "|t|" + toestel), vinger: await sha(z + "|v|" + ip + "|" + ua), ip: await sha(z + "|i|" + ip), net: await sha(z + "|n|" + netVan(ip)) };
   }
   async function opruimen(db, t) {
     const dag = new Date(t).toISOString().slice(0, 10);
@@ -187,10 +313,11 @@ export function maakServer(opties = {}) {
 
   async function lijst(req, env, ctx) {
     const url = new URL(req.url);
-    const vak = url.searchParams.get("vak") || "";
-    const m = /^(-?\d{1,4})_(-?\d{1,4})$/.exec(vak);
-    if (!m) return fout(400, "vak");
-    const t = nu();
+    const v = leesVak(url.searchParams.get("vak"));
+    if (!v) return fout(400, "vak");
+    const vak = v.vak, t = nu();
+    // Buiten NL en BE kan niets staan: meteen leeg, zonder query.
+    if (bereik && (v.a < bereik.a0 || v.a > bereik.a1 || v.b < bereik.b0 || v.b > bereik.b1)) return antwoord(200, { nu: t, vak, meldingen: [] }, { "Cache-Control": "public, max-age=3600" });
     const kort = geheugen.get(vak);
     if (kort && !opties.zonderCache && t - kort.t < REGELS.cacheS * 1000) return new Response(kort.body, { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": `public, max-age=${REGELS.cacheS}` } });
     let cache = null;
@@ -199,7 +326,7 @@ export function maakServer(opties = {}) {
     if (cache && !opties.zonderCache) {
       try { const c = await cache.match(sleutel); if (c) return c; } catch { /* zonder cache */ }
     }
-    const lat0 = +m[1] * VAK_LAT, lon0 = +m[2] * VAK_LON;
+    const lat0 = v.a * VAK_LAT, lon0 = v.b * VAK_LON;
     const { results } = await env.DB.prepare("SELECT * FROM meldingen WHERE verloopt > ? AND lat >= ? AND lat < ? AND lon >= ? AND lon < ? ORDER BY gemaakt DESC LIMIT 300")
       .bind(t, lat0, lat0 + VAK_LAT, lon0, lon0 + VAK_LON).all();
     const body = JSON.stringify({ nu: t, vak, meldingen: results.map(vorm) });
@@ -227,16 +354,22 @@ export function maakServer(opties = {}) {
     if (koers != null) koers = Math.round(koers) % 360;
     if (!inLandAan(lat, lon)) return fout(403, "buiten");
     const db = env.DB, t = nu();
-    const w = await wie(req, db, b.toestel, t);
+    const id = await keurToestel(db, b.toestel, t);
+    if (!id) return fout(400, "toestel");
+    const w = { ...(await wie(req, db, b.toestel, t)), vers: id.vers };
     // Limieten: per toestel geen reeks en een maximum per dag; per vingerafdruk ruimer.
     const tel = async (kolom, waarde, sinds) => Number((await db.prepare(`SELECT COUNT(*) AS n FROM acties WHERE soort = 'meld' AND ${kolom} = ? AND t > ?`).bind(waarde, sinds).first()).n);
     const laatste = await db.prepare("SELECT MAX(t) AS t FROM acties WHERE soort = 'meld' AND toestel = ?").bind(w.toestel).first();
     if (laatste && laatste.t && t - laatste.t < REGELS.tussenMin * 60e3) return fout(429, "te_snel", { "Retry-After": String(Math.ceil((REGELS.tussenMin * 60e3 - (t - laatste.t)) / 1000)) });
-    if ((await tel("toestel", w.toestel, t - 24 * 3600e3)) >= REGELS.perToestelDag) return fout(429, "dag_vol");
+    if ((await tel("toestel", w.toestel, t - 24 * 3600e3)) >= (id.vers ? REGELS.versPerDag : REGELS.perToestelDag)) return fout(429, "dag_vol");
     if ((await tel("vinger", w.vinger, t - 10 * 60e3)) >= REGELS.perVingerTienMin) return fout(429, "te_snel");
     if ((await tel("vinger", w.vinger, t - 24 * 3600e3)) >= REGELS.perVingerDag) return fout(429, "dag_vol");
+    if ((await tel("ip", w.ip, t - 3600e3)) >= REGELS.perIpUur) return fout(429, "te_snel");
+    if ((await tel("ip", w.ip, t - 24 * 3600e3)) >= REGELS.perIpDag) return fout(429, "dag_vol");
+    if ((await tel("net", w.net, t - 3600e3)) >= REGELS.perNetUur) return fout(429, "te_snel");
+    if ((await tel("net", w.net, t - 24 * 3600e3)) >= REGELS.perNetDag) return fout(429, "dag_vol");
     await opruimen(db, t);
-    await db.prepare("INSERT INTO acties (soort, toestel, vinger, t) VALUES ('meld', ?, ?, ?)").bind(w.toestel, w.vinger, t).run();
+    await db.prepare("INSERT INTO acties (soort, toestel, vinger, t, ip, net) VALUES ('meld', ?, ?, ?, ?, ?)").bind(w.toestel, w.vinger, t, w.ip, w.net).run();
     vergeetVak(lat, lon);
     // Staat er al een vlakbij in dezelfde richting? Dan telt dit als een ja.
     const dLat = REGELS.samenM / 111000, dLon = REGELS.samenM / (111000 * Math.cos(lat * rad));
@@ -244,7 +377,7 @@ export function maakServer(opties = {}) {
     const zelfde = buren.filter((r) => afstand(lat, lon, r.lat, r.lon) <= REGELS.samenM && (r.koers == null || koers == null || verschil(r.koers, koers) < 60))
       .sort((a, c) => afstand(lat, lon, a.lat, a.lon) - afstand(lat, lon, c.lat, c.lon))[0];
     if (zelfde) {
-      const r = await stemOp(db, zelfde, w.toestel, true, t);
+      const r = await stemOp(db, zelfde, w, true, t);
       return antwoord(200, { samengevoegd: true, melding: vorm(r) });
     }
     const verloopt = t + REGELS.basisMin * 60e3;
@@ -260,20 +393,24 @@ export function maakServer(opties = {}) {
 
   /** Een stem verwerken; geeft de bijgewerkte rij. Eén stem per toestel per melding, behalve de
    *  melder: die stemt na eigenNaMin, en daarna eens per eigenTussenMin (zelfde rij in stemmen). */
-  async function stemOp(db, rij, toestelHash, ja, t) {
+  async function stemOp(db, rij, w, ja, t) {
+    const toestelHash = w.toestel;
     const eigen = rij.melder === toestelHash;
     if (eigen && t - rij.gemaakt < REGELS.eigenNaMin * 60e3) return rij;
     const gedaan = eigen
-      ? await db.prepare("INSERT INTO stemmen (melding, toestel, ja, t) VALUES (?, ?, ?, ?) ON CONFLICT (melding, toestel) DO UPDATE SET ja = excluded.ja, t = excluded.t WHERE stemmen.t <= ? RETURNING melding")
-        .bind(rij.id, toestelHash, ja ? 1 : 0, t, t - REGELS.eigenTussenMin * 60e3).first()
-      : await db.prepare("INSERT OR IGNORE INTO stemmen (melding, toestel, ja, t) VALUES (?, ?, ?, ?) RETURNING melding").bind(rij.id, toestelHash, ja ? 1 : 0, t).first();
+      ? await db.prepare("INSERT INTO stemmen (melding, toestel, ja, t, ip, vers) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (melding, toestel) DO UPDATE SET ja = excluded.ja, t = excluded.t, ip = excluded.ip WHERE stemmen.t <= ? RETURNING melding")
+        .bind(rij.id, toestelHash, ja ? 1 : 0, t, w.ip || null, w.vers ? 1 : 0, t - REGELS.eigenTussenMin * 60e3).first()
+      : await db.prepare("INSERT OR IGNORE INTO stemmen (melding, toestel, ja, t, ip, vers) VALUES (?, ?, ?, ?, ?, ?) RETURNING melding").bind(rij.id, toestelHash, ja ? 1 : 0, t, w.ip || null, w.vers ? 1 : 0).first();
     if (!gedaan) return rij;
     let { ja: nJa, nee: nNee, verloopt } = rij;
     const max = rij.gemaakt + REGELS.maxUur * 3600e3;
     if (ja) { nJa++; verloopt = Math.min(max, Math.max(verloopt, t + REGELS.jaMin * 60e3)); }
     else {
       nNee++;
-      if (eigen || (nNee >= REGELS.neeWeg && nNee > nJa)) verloopt = t; // de melder weet het het best
+      // Meteen weg alleen door nee van verschillende IP-hashes (H2): tien toestel-ids achter één IP
+      // tellen als één. Stemmen van een toestel-id van vandaag tellen hier niet mee.
+      const andereIps = eigen ? 0 : Number((await db.prepare("SELECT COUNT(DISTINCT ip) AS n FROM stemmen WHERE melding = ? AND ja = 0 AND vers = 0 AND ip IS NOT NULL AND toestel <> ?").bind(rij.id, rij.melder).first()).n);
+      if (eigen || (andereIps >= REGELS.neeWeg && nNee > nJa)) verloopt = t; // de melder weet het het best
       else verloopt = Math.min(verloopt, t + (nNee > nJa ? REGELS.neeMin : REGELS.jaMin) * 60e3);
     }
     return db.prepare("UPDATE meldingen SET ja = ?, nee = ?, verloopt = ?, laatste_ja = CASE WHEN ? = 1 THEN ? ELSE laatste_ja END WHERE id = ? RETURNING *")
@@ -284,17 +421,22 @@ export function maakServer(opties = {}) {
     const b = await leesBody(req);
     if (!b || typeof b.toestel !== "string" || !TOESTEL.test(b.toestel) || typeof b.ja !== "boolean") return fout(400, "stem");
     const db = env.DB, t = nu();
+    const tid = await keurToestel(db, b.toestel, t);
+    if (!tid) return fout(400, "toestel");
     const rij = await db.prepare("SELECT * FROM meldingen WHERE id = ? AND verloopt > ?").bind(id, t).first();
     if (!rij) return fout(404, "weg");
-    const w = await wie(req, db, b.toestel, t);
+    const w = { ...(await wie(req, db, b.toestel, t)), vers: tid.vers };
     const eigen = rij.melder === w.toestel;
     if (eigen && t - rij.gemaakt < REGELS.eigenNaMin * 60e3) return fout(409, "eigen", { "Retry-After": String(Math.ceil((rij.gemaakt + REGELS.eigenNaMin * 60e3 - t) / 1000)) });
     const n = Number((await db.prepare("SELECT COUNT(*) AS n FROM acties WHERE soort = 'stem' AND toestel = ? AND t > ?").bind(w.toestel, t - 24 * 3600e3).first()).n);
     if (n >= REGELS.stemmenPerToestelDag) return fout(429, "dag_vol");
+    const telStem = async (kolom, waarde, sinds) => Number((await db.prepare(`SELECT COUNT(*) AS n FROM acties WHERE soort = 'stem' AND ${kolom} = ? AND t > ?`).bind(waarde, sinds).first()).n);
+    if ((await telStem("ip", w.ip, t - 3600e3)) >= REGELS.stemmenPerIpUur) return fout(429, "te_snel");
+    if ((await telStem("net", w.net, t - 3600e3)) >= REGELS.stemmenPerNetUur) return fout(429, "te_snel");
     const al = await db.prepare("SELECT t FROM stemmen WHERE melding = ? AND toestel = ?").bind(id, w.toestel).first();
     if (al && (!eigen || !eigenMag(rij, al.t, t))) return antwoord(200, { al: true, melding: vorm(rij) });
-    await db.prepare("INSERT INTO acties (soort, toestel, vinger, t) VALUES ('stem', ?, ?, ?)").bind(w.toestel, w.vinger, t).run();
-    const nieuw = await stemOp(db, rij, w.toestel, b.ja, t);
+    await db.prepare("INSERT INTO acties (soort, toestel, vinger, t, ip, net) VALUES ('stem', ?, ?, ?, ?, ?)").bind(w.toestel, w.vinger, t, w.ip, w.net).run();
+    const nieuw = await stemOp(db, rij, w, b.ja, t);
     vergeetVak(rij.lat, rij.lon);
     return antwoord(200, { melding: { ...vorm(nieuw), weg: nieuw.verloopt <= t } });
   }
@@ -313,11 +455,10 @@ export function maakServer(opties = {}) {
   }
   async function feed(req, env) {
     const url = new URL(req.url);
-    const vak = url.searchParams.get("vak") || "";
-    const m = /^(-?\d{1,4})_(-?\d{1,4})$/.exec(vak);
-    if (!m) return fout(400, "vak");
-    const t = nu();
-    const lat0 = +m[1] * VAK_LAT, lon0 = +m[2] * VAK_LON;
+    const v = leesVak(url.searchParams.get("vak"));
+    if (!v) return fout(400, "vak");
+    const vak = v.vak, t = nu();
+    const lat0 = v.a * VAK_LAT, lon0 = v.b * VAK_LON;
     const { results } = await env.DB.prepare("SELECT * FROM meldingen WHERE verloopt > ? AND lat >= ? AND lat < ? AND lon >= ? AND lon < ? ORDER BY gemaakt DESC LIMIT 300")
       .bind(t, lat0, lat0 + VAK_LAT, lon0, lon0 + VAK_LON).all();
     const body = JSON.stringify({
@@ -372,12 +513,14 @@ export function maakServer(opties = {}) {
 
   async function msiVak(req, ctx) {
     const url = new URL(req.url);
-    const vak = url.searchParams.get("vak") || "";
-    if (!/^(-?\d{1,4})_(-?\d{1,4})$/.test(vak)) return fout(400, "vak");
+    const v = leesVak(url.searchParams.get("vak"));
+    if (!v) return fout(400, "vak");
+    const vak = v.vak;
     if (!msiVakken) return fout(503, "msi");
-    if (!msiIds.has(vak)) msiIds.set(vak, msiVakken.vakken[vak] ? msiVakken.vakken[vak].split(",") : []);
-    const ids = msiIds.get(vak);
     const t = nu();
+    // Alleen vakken met borden komen in msiIds (M1: anders groeit de Map met elke verzonnen vakstring).
+    if (!msiIds.has(vak) && Object.prototype.hasOwnProperty.call(msiVakken.vakken, vak)) msiIds.set(vak, msiVakken.vakken[vak].split(","));
+    const ids = msiIds.get(vak) || [];
     if (!ids.length) return antwoord(200, { nu: t, vak, bron: null, borden: {} }, { "Cache-Control": "public, max-age=3600" });
     let feed;
     try { feed = await msiFeed(url, ctx); } catch { return fout(503, "msi", { "Retry-After": "30" }); }
@@ -392,14 +535,25 @@ export function maakServer(opties = {}) {
   }
 
   return {
+    /** Geplande run (OPRUIMEN_CRON): ruimt op ook als er geen nieuwe meldingen komen. */
+    async scheduled(event, env) {
+      if (!env || !env.DB) return;
+      await opruimen(env.DB, nu());
+    },
     async fetch(req, env, ctx) {
       const url = new URL(req.url);
       const p = url.pathname.replace(/\/+$/, "");
       try {
+        if ((p.startsWith("/api/") || p === "/feed") && teVeel(req)) return fout(429, "te_veel", { "Retry-After": "60" });
+        if (req.method !== "GET" && req.method !== "HEAD") {
+          const nee = poortSchrijven(req, url, opties.herkomsten || (env && env.HERKOMST ? String(env.HERKOMST).split(",").map((x) => x.trim()) : EIGEN_HERKOMST));
+          if (nee) return nee;
+        }
         if (p === "/api/msi" && req.method === "GET") return await msiVak(req, ctx);
         if (!env.DB) return fout(503, "geen_database");
         if (p === "/api/meldingen" && req.method === "GET") return await lijst(req, env, ctx);
         if (p === "/api/meldingen" && req.method === "POST") return await meld(req, env);
+        if (p === "/api/toestel" && req.method === "POST") return await geefToestel(req, env);
         const s = /^\/api\/meldingen\/(\d{1,12})\/stem$/.exec(p);
         if (s && req.method === "POST") return await stem(req, env, Number(s[1]));
         if ((p === "/feed" || p === "/api/feed") && req.method === "GET") return await feed(req, env);
@@ -416,4 +570,4 @@ export function maakServer(opties = {}) {
 // In de bundel staan hierboven const GRENZEN (de inhoud van landen uit site/data/grenzen.json) en
 // const MSI_VAKKEN (server/msi-vakken.json, alleen voor de matrixborden in NL).
 const server = maakServer({ grenzen: typeof GRENZEN !== "undefined" ? GRENZEN : null, msiVakken: typeof MSI_VAKKEN !== "undefined" ? MSI_VAKKEN : null }); // eslint-disable-line no-undef
-export default { fetch: (req, env, ctx) => server.fetch(req, env, ctx) };
+export default { fetch: (req, env, ctx) => server.fetch(req, env, ctx), scheduled: (event, env, ctx) => server.scheduled(event, env, ctx) };

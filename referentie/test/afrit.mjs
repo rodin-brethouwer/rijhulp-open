@@ -3,7 +3,8 @@
 // "130 @ (19:00-06:00)", een motorway_link vlak ernaast staat op 130 zonder voorwaarde, en een GPS
 // een paar meter naast de as plakte de auto op die link. Dan zei de app om 9:00 130.
 // Getest: een link nooit hoger dan zijn hoofdrijbaan, de hoofdrijbaan voorrang boven 80 km/h,
-// een echte afrit bij lage snelheid, en de tijdvoorwaarde in Europe/Amsterdam.
+// een echte afrit bij lage snelheid, de tijdvoorwaarde in Europe/Amsterdam, en het vangnet: een
+// verbindingsweg nooit boven 100 (behalve 's nachts met een tijdvoorwaarde).
 // node referentie/test/afrit.mjs
 import fs from "node:fs";
 import vm from "node:vm";
@@ -22,13 +23,19 @@ const t = [
   ["motorway", "100", "", "", "130 @ (19:00-06:00)", "yes", "", ""],
   ["motorway_link", "130", "", "", "", "yes", "", ""],
   ["motorway_link", "80", "", "", "", "yes", "", ""],
-  ["motorway_link", "50", "", "", "", "yes", "", ""]
+  ["motorway_link", "50", "", "", "", "yes", "", ""],
+  ["motorway_link", "130", "", "", "", "yes", "", ""], // verbindingsweg in een knooppunt
+  ["motorway_link", "100", "", "", "130 @ (19:00-06:00)", "yes", "", ""],
+  ["motorway", "130", "", "", "", "yes", "", ""]
 ];
 const w = [
   0, polyline([[52.05, 4.31], [52.05, 4.35], [52.05, 4.39]]), // hoofdrijbaan naar het oosten
   1, polyline([[52.05 - ZUID, 4.33], [52.05 - ZUID, 4.35]]), // link van 130 vlak ernaast
   2, polyline([[52.05, 4.37], [52.049, 4.38], [52.048, 4.385]]), // echte afrit van 80
-  3, polyline([[52.06, 4.33], [52.06, 4.34]]) // link van 50, ruim 1 km van de snelweg
+  3, polyline([[52.06, 4.33], [52.06, 4.34]]), // link van 50, ruim 1 km van de snelweg
+  4, polyline([[52.10, 4.33], [52.10, 4.34]]), // verbindingsweg op 130, geen hoofdrijbaan ernaast
+  5, polyline([[52.12, 4.33], [52.12, 4.34]]), // link met nachtvoorwaarde
+  6, polyline([[52.15, 4.30], [52.15, 4.40]]) // snelweg met 130 de hele dag
 ];
 const bestanden = { "kaart/index.json": { stand: "test", g: ["260_14"] }, "kaart/260_14.json": { v: 2, t, w } };
 const fetch = async (p) => {
@@ -110,10 +117,27 @@ const samen = (stappen) => { const c = {}; stappen.forEach((s) => { const k = s.
   meld(r && r.limiet && r.limiet.v === 50, "link 50 ver van de snelweg blijft 50:", r && r.limiet && r.limiet.v, r && r.h);
 }
 
-// ---------- Op de link van 130 bij lage snelheid: hooguit de hoofdrijbaan ----------
-for (const [tijd, verwacht] of [["2026-10-26T09:00:00+01:00", 100], ["2026-10-26T21:00:00+01:00", 130]]) {
+// ---------- Op de link van 130 bij lage snelheid: hooguit de hoofdrijbaan, en nooit boven 100 ----------
+// 's Avonds heeft de hoofdrijbaan 130, maar de link zelf staat op 130 zonder tijdvoorwaarde: het
+// vangnet voor verbindingswegen (LINK_PLAFOND) houdt hem op 100.
+for (const [tijd, verwacht] of [["2026-10-26T09:00:00+01:00", 100], ["2026-10-26T21:00:00+01:00", 100]]) {
   const r = K.weg(52.05 - ZUID, 4.34, 90, new Date(tijd), 40);
   meld(r && /link/.test(r.h) && r.limiet && r.limiet.v === verwacht, "link 130", tijd.slice(11, 16), "hooguit de hoofdrijbaan:", r && r.h, r && r.limiet && r.limiet.v);
+}
+
+// ---------- Vangnet voor verbindingswegen (LINK_PLAFOND) ----------
+await laad([[52.10, 4.335], [52.12, 4.335], [52.15, 4.35]]);
+for (const tijd of ["2026-10-27T09:00:00+01:00", "2026-10-27T17:00:00+01:00", "2026-10-27T23:00:00+01:00"]) {
+  const r = K.weg(52.10, 4.335, 90, new Date(tijd), 70);
+  meld(r && r.h === "motorway_link" && r.limiet && r.limiet.v === 100 && r.limiet.plafond, "verbindingsweg 130 zonder voorwaarde", tijd.slice(11, 16), "toont 100:", JSON.stringify(r && r.limiet));
+}
+for (const [tijd, verwacht] of [["2026-10-27T09:00:00+01:00", 100], ["2026-10-27T21:00:00+01:00", 130]]) {
+  const r = K.weg(52.12, 4.335, 90, new Date(tijd), 70);
+  meld(r && r.limiet && r.limiet.v === verwacht, "link met nachtvoorwaarde", tijd.slice(11, 16), r && r.limiet && r.limiet.v);
+}
+for (const tijd of ["2026-10-27T09:00:00+01:00", "2026-10-27T12:00:00+01:00", "2026-10-27T17:00:00+01:00", "2026-10-31T09:00:00+01:00"]) {
+  const r = K.weg(52.15, 4.35, 90, new Date(tijd), 120);
+  meld(r && r.h === "motorway" && r.limiet && r.limiet.v === 130, "snelweg de hele dag 130", tijd.slice(0, 16), r && r.limiet && r.limiet.v);
 }
 
 console.log(fout ? `${fout} fout` : "alles goed");

@@ -1,7 +1,8 @@
 // Gemelde mobiele flitsers: melden met één tik, ophalen per kaartvak, een melding vooraf zoals bij
 // een vaste paal, en na het langsrijden de vraag "Staat hij er nog?". De server staat onder /api op
-// dezelfde site (referentie/server/server.mjs). Geen account: een willekeurig toestel-id in deze
-// browser, dat de server alleen gehasht met een dagzout bewaart.
+// dezelfde site (referentie/server/server.mjs). Geen account: een toestel-id dat de server uitgeeft
+// (POST api/toestel, ondertekend, bij de eerste melding of stem) en dat in deze browser blijft; de
+// server bewaart het alleen gehasht met een dagzout.
 (function (w) {
   "use strict";
   var G = w.Geo;
@@ -19,14 +20,33 @@
   function opslag(k, v) {
     try { if (v === undefined) return JSON.parse(localStorage.getItem(k) || "null"); localStorage.setItem(k, JSON.stringify(v)); } catch (e) { return null; }
   }
-  function maakId() {
-    var b = new Uint8Array(18);
-    (w.crypto || {}).getRandomValues ? w.crypto.getRandomValues(b) : b.forEach(function (_, i) { b[i] = Math.random() * 256; });
-    return btoa(String.fromCharCode.apply(null, b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  // Een tweede "gebruiker" in de proefrit: ?toestel=<naam> (alleen samen met ?sim=) krijgt een eigen id.
+  var ID = /^b\d{5}[0-9a-f]{40}$/; // gelijk aan TOESTEL_SERVER in server/server.mjs
+  var toestelSleutel = "rijhulp-toestel" + (q.has("sim") && /^[A-Za-z0-9_-]{1,64}$/.test(q.get("toestel") || "") ? "-" + q.get("toestel") : "");
+  var toestel = opslag(toestelSleutel);
+  if (!ID.test(toestel || "")) toestel = null; // een oud, zelf gekozen id neemt de server niet meer aan
+  var toestelVraag = null;
+  /** Het id van de server, één keer gevraagd en daarna uit localStorage. */
+  function zorgToestel(opnieuw) {
+    if (toestel && !opnieuw) return Promise.resolve(toestel);
+    if (toestelVraag) return toestelVraag;
+    toestelVraag = fetch("api/toestel", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok || !ID.test(j.toestel || "")) throw new Error(j.fout || "http_" + r.status); return j.toestel; }); })
+      .then(function (id) { toestel = id; opslag(toestelSleutel, id); toestelVraag = null; return id; }, function (e) { toestelVraag = null; throw e; });
+    return toestelVraag;
   }
-  // Een tweede "gebruiker" in de proefrit: ?toestel=... werkt alleen samen met ?sim=.
-  var toestel = q.has("sim") && /^[A-Za-z0-9_-]{16,64}$/.test(q.get("toestel") || "") ? q.get("toestel") : opslag("rijhulp-toestel");
-  if (!toestel || !/^[A-Za-z0-9_-]{16,64}$/.test(toestel)) { toestel = maakId(); opslag("rijhulp-toestel", toestel); }
+  /** POST met het toestel-id; weigert de server het id, dan één keer een nieuw vragen. */
+  function postMetToestel(pad, velden) {
+    function stuur(id) {
+      var b = { toestel: id }; for (var k in velden) b[k] = velden[k];
+      return fetch(pad, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { status: r.status, j: j }; }); });
+    }
+    return zorgToestel().then(stuur).then(function (x) {
+      if (x.status === 400 && x.j && x.j.fout === "toestel") return zorgToestel(true).then(stuur);
+      return x;
+    });
+  }
   var eigenSleutel = "rijhulp-eigen" + (q.has("sim") && q.get("toestel") ? "-" + q.get("toestel") : "");
   var eigen = opslag(eigenSleutel) || {}; // id -> verloopt: eigen meldingen (vraag pas na 20 min, de server weigert ook eerder)
   var gestemdSleutel = "rijhulp-gestemd" + (q.has("sim") && q.get("toestel") ? "-" + q.get("toestel") : "");
@@ -117,8 +137,7 @@
   /** Eén tik op "Flitser hier". p: { lat, lon, koers, acc }. Geeft een belofte met { ok, code }. */
   function meld(p) {
     if (!p) return Promise.resolve({ ok: false, code: "geen_positie" });
-    return fetch("api/meldingen", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ toestel: toestel, lat: p.lat, lon: p.lon, koers: p.koers == null ? null : Math.round(p.koers), nauwkeurig: p.acc == null ? null : Math.round(p.acc) }) })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { status: r.status, j: j }; }); })
+    return postMetToestel("api/meldingen", { lat: p.lat, lon: p.lon, koers: p.koers == null ? null : Math.round(p.koers), nauwkeurig: p.acc == null ? null : Math.round(p.acc) })
       .then(function (x) {
         if (x.status === 201 || x.status === 200) {
           var m = x.j.melding; m.vak = vakVan(m.lat, m.lon); meldingen[m.id] = m;
@@ -129,12 +148,11 @@
           return { ok: true, samengevoegd: !!x.j.samengevoegd, id: m.id };
         }
         return { ok: false, code: x.j.fout || "http_" + x.status };
-      }, function () { return { ok: false, code: "netwerk" }; });
+      }, function (e) { return { ok: false, code: e && /^(dag_vol|te_snel|te_veel)$/.test(e.message) ? (e.message === "dag_vol" ? "dag_vol" : "te_snel") : "netwerk" }; });
   }
   function stem(id, ja) {
     gestemd[id] = Date.now(); opslag(gestemdSleutel, gestemd);
-    return fetch("api/meldingen/" + id + "/stem", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ toestel: toestel, ja: !!ja }) })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { status: r.status, j: j }; }); })
+    return postMetToestel("api/meldingen/" + id + "/stem", { ja: !!ja })
       .then(function (x) {
         if (x.j && x.j.melding) { if (x.j.melding.weg) delete meldingen[id]; else if (meldingen[id]) { x.j.melding.vak = meldingen[id].vak; meldingen[id] = x.j.melding; } }
         return x;

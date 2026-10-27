@@ -19,7 +19,10 @@ const publiek = naarB64url(await crypto.subtle.exportKey("raw", paar.publicKey))
 const env = { DB, APP_ID: "proef-app", FEED_SLEUTEL: geheim };
 
 const plek = { lat: 52.026234, lon: 4.534911, koers: 10 };
-let r = await server.fetch(new Request("https://rijhulp.example/api/meldingen", { method: "POST", body: JSON.stringify({ toestel: "toestel-aaaaaaaaaaaaaaaa", ...plek }), headers: { "x-real-ip": "1.2.3.4", "user-agent": "proef" } }), env, null);
+// Het toestel-id geeft de server uit (POST /api/toestel); schrijven alleen als JSON.
+const json = { "x-real-ip": "1.2.3.4", "user-agent": "proef", "content-type": "application/json" };
+const toestel = (await (await server.fetch(new Request("https://rijhulp.example/api/toestel", { method: "POST", body: "{}", headers: json }), env, null)).json()).toestel;
+let r = await server.fetch(new Request("https://rijhulp.example/api/meldingen", { method: "POST", body: JSON.stringify({ toestel, ...plek }), headers: json }), env, null);
 assert.equal(r.status, 201);
 
 const vak = vakVan(plek.lat, plek.lon);

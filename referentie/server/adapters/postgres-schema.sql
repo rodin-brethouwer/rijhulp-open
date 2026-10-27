@@ -33,6 +33,18 @@ CREATE TABLE IF NOT EXISTS zout (
   dag TEXT PRIMARY KEY,
   waarde TEXT NOT NULL
 );
+-- Verharding 26 okt 2026 (server/migraties/0002_ip_en_toestel.sql): limieten per IP-hash en net,
+-- nee alleen van verschillende IP's, en de sleutel voor de toestel-ids van de server.
+ALTER TABLE acties ADD COLUMN IF NOT EXISTS ip TEXT;
+ALTER TABLE acties ADD COLUMN IF NOT EXISTS net TEXT;
+CREATE INDEX IF NOT EXISTS acties_ip ON acties (soort, ip, t);
+CREATE INDEX IF NOT EXISTS acties_net ON acties (soort, net, t);
+ALTER TABLE stemmen ADD COLUMN IF NOT EXISTS ip TEXT;
+ALTER TABLE stemmen ADD COLUMN IF NOT EXISTS vers INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS sleutel (
+  naam TEXT PRIMARY KEY,
+  waarde TEXT NOT NULL
+);
 -- Supabase zet tabellen in het schema public ook open voor de browser-API. De server praat
 -- rechtstreeks met de database als eigenaar van de tabellen; RLS zonder regels houdt de
 -- browser-API buiten (de eigenaar merkt er niets van).
@@ -40,3 +52,4 @@ ALTER TABLE meldingen ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stemmen ENABLE ROW LEVEL SECURITY;
 ALTER TABLE acties ENABLE ROW LEVEL SECURITY;
 ALTER TABLE zout ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sleutel ENABLE ROW LEVEL SECURITY;

@@ -50,9 +50,16 @@ export function sqliteDb(bestand = ":memory:") {
   };
 }
 
-/** Draait de migraties uit server/migraties/ in volgorde (ze zijn idempotent: IF NOT EXISTS). */
+/** Draait de migraties uit server/migraties/ in volgorde, bij elke start. Ze zijn idempotent: IF NOT
+ *  EXISTS, en een ALTER TABLE ... ADD COLUMN voor een kolom die er al is wordt overgeslagen (SQLite
+ *  kent geen ADD COLUMN IF NOT EXISTS). */
 export function migreer(db, map = new URL("../migraties/", import.meta.url)) {
   const namen = fs.readdirSync(map).filter((n) => n.endsWith(".sql")).sort();
-  for (const n of namen) db.sql.exec(fs.readFileSync(new URL(n, map), "utf8"));
+  for (const n of namen) {
+    const tekst = fs.readFileSync(new URL(n, map), "utf8").replace(/^--.*$/gm, "");
+    for (const zin of tekst.split(";").map((z) => z.trim()).filter(Boolean)) {
+      try { db.sql.exec(zin); } catch (e) { if (!/^ALTER TABLE/i.test(zin) || !/duplicate column/i.test(String(e && e.message))) throw e; }
+    }
+  }
   return namen;
 }

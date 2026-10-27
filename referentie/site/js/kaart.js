@@ -323,35 +323,71 @@
     } catch (e) { /* onbekende zone of geen Intl */ }
     return { dag: d.getDay(), min: d.getHours() * 60 + d.getMinutes() };
   }
-  /** Klopt een eenvoudige voorwaarde zoals "Mo-Fr 06:00-10:00,15:00-19:00" of "(19:00-06:00)" nu? Anders null (onbekend). */
-  function voorwaardeNu(c, d, zone) {
-    // Een voorwaarde met vrije tekst ("bij grote verkeersdrukte") kunnen we niet zien: niet toepassen.
-    if (/"/.test(c)) return null;
-    c = c.replace(/^\(|\)$/g, "").trim();
-    var m = /^(?:((?:Mo|Tu|We|Th|Fr|Sa|Su)(?:-(?:Mo|Tu|We|Th|Fr|Sa|Su))?(?:,(?:Mo|Tu|We|Th|Fr|Sa|Su)(?:-(?:Mo|Tu|We|Th|Fr|Sa|Su))?)*)\s+)?((?:\d{1,2}:\d{2}-\d{1,2}:\d{2},?\s*)+)$/.exec(c);
-    if (!m) return null;
-    var nu = tijdIn(d, zone || ZONE), dag = nu.dag;
-    if (m[1]) {
-      var goed = m[1].split(",").some(function (r) {
-        var x = r.split("-"), a = DAG[x[0]], b = x[1] != null ? DAG[x[1]] : a;
-        return a <= b ? dag >= a && dag <= b : dag >= a || dag <= b;
+  // Dagen in de OSM-notatie (opening_hours): Mo Tu We Th Fr Sa Su, bereiken (Mo-Fr, ook over het
+  // weekend heen: Fr-Mo) en lijsten (Mo,We,Fr). PH (feestdag) en SH (schoolvakantie) kent de app niet:
+  // een regel die alleen voor PH of SH geldt, telt niet, en "PH off" verandert niets.
+  var DAGTOKEN = /^(Mo|Tu|We|Th|Fr|Sa|Su|PH|SH)(?:-(Mo|Tu|We|Th|Fr|Sa|Su))?$/;
+  /** Leest één regel ("Mo-Fr 06:00-10:00,15:00-19:00", "Sa,Su", "PH off", "19:00-06:00") of null als hij niet te lezen is. */
+  function leesRegel(r) {
+    r = r.replace(/\s*-\s*/g, "-").replace(/\s*,\s*/g, ",").trim();
+    if (!r) return { leeg: true };
+    var m = /^(\S+?)(?:\s+(.+))?$/.exec(r), dagen = null, rest = r;
+    if (m && m[1].split(",").every(function (x) { return DAGTOKEN.test(x); })) {
+      dagen = { set: {}, alleenPhSh: true };
+      m[1].split(",").forEach(function (x) {
+        var y = DAGTOKEN.exec(x);
+        if (y[1] === "PH" || y[1] === "SH") return;
+        dagen.alleenPhSh = false;
+        var van = DAG[y[1]], tot = y[2] != null ? DAG[y[2]] : van;
+        for (var k = van, n = 0; n < 7; k = (k + 1) % 7, n++) { dagen.set[k] = true; if (k === tot) break; }
       });
-      if (!goed) return false;
+      rest = (m[2] || "").trim();
     }
-    var min = nu.min;
-    return m[2].split(",").some(function (r) {
-      var x = /(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})/.exec(r);
-      if (!x) return false;
-      var a = +x[1] * 60 + +x[2], b = +x[3] * 60 + +x[4];
-      return a <= b ? min >= a && min < b : min >= a || min < b;
+    if (rest === "off" || rest === "closed") return { dagen: dagen, uit: true };
+    if (!rest) return dagen ? { dagen: dagen, tijden: null } : null;
+    var tijden = [];
+    var goed = rest.split(",").every(function (x) {
+      var t = /^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/.exec(x);
+      if (!t) return false;
+      tijden.push([+t[1] * 60 + +t[2], +t[3] * 60 + +t[4]]);
+      return true;
     });
+    return goed ? { dagen: dagen, tijden: tijden } : null;
+  }
+  /**
+   * Klopt een tijdvoorwaarde nu? "Mo-Fr 06:00-10:00,15:00-19:00", "(19:00-06:00)",
+   * "Mo,Tu 08:00-08:45; We 08:00-12:00; PH off". true, false, of null als hij niet te lezen is
+   * (dan geldt de basislimiet). Tekst tussen aanhalingstekens ("bij grote verkeersdrukte") telt niet
+   * mee. Dag en tijd zijn die in de zone (Europe/Amsterdam of Brussels), niet die van het toestel.
+   */
+  function voorwaardeNu(c, d, zone) {
+    c = c.replace(/"[^"]*"?/g, " ").trim().replace(/^\(/, "").replace(/\)\s*$/, "").trim();
+    if (!c) return null;
+    // Regels staan achter elkaar met ";" of met ", " gevolgd door een dag (de tweede vorm uit opening_hours).
+    var regels = c.replace(/(\d),\s*(?=(?:Mo|Tu|We|Th|Fr|Sa|Su|PH|SH)\b)/g, "$1;").split(";").map(leesRegel);
+    if (regels.some(function (r) { return r === null; })) return null;
+    var nu = tijdIn(d, zone || ZONE), dag = nu.dag, min = nu.min, telt = false, raak = false;
+    for (var i = 0; i < regels.length; i++) {
+      var r = regels[i];
+      if (r.leeg) continue;
+      if (r.dagen && (r.dagen.alleenPhSh || !r.dagen.set[dag])) continue;
+      telt = true;
+      if (r.uit) { raak = false; continue; }
+      if (!r.tijden) { raak = true; continue; }
+      if (r.tijden.some(function (x) { var a = x[0], b = x[1]; return a <= b ? min >= a && min < b : min >= a || min < b; })) raak = true;
+    }
+    return telt && raak;
   }
   /** Past maxspeed:conditional toe: "130 @ (19:00-06:00); 100 @ wet" -> de eerste die nu geldt. */
   function metVoorwaarde(basis, mc, d, zone) {
     if (!mc) return basis;
-    var delen = mc.split(/;(?![^(]*\))/);
+    // Delen zonder "<waarde> @" horen bij de voorwaarde ervoor ("5 @ Mo-Fr 08:10-08:40; We 11:55-12:25").
+    var delen = [];
+    mc.split(/;(?![^(]*\))/).forEach(function (x) {
+      if (/^\s*[\w.]+\s*@/.test(x) || !delen.length) delen.push(x); else delen[delen.length - 1] += ";" + x;
+    });
     for (var i = 0; i < delen.length; i++) {
-      var x = /^\s*(\d{1,3})\s*@\s*(.+)$/.exec(delen[i]);
+      var x = /^\s*(\d{1,3})\s*@\s*([\s\S]+)$/.exec(delen[i]);
       if (!x) continue;
       if (voorwaardeNu(x[2].trim(), d, zone) === true) return { v: +x[1], voorwaarde: true };
     }
@@ -377,6 +413,14 @@
   //    duidelijk dichterbij en de snelheid zakt).
   // 2. Een link nooit hoger dan zijn snelweg: de limiet van een link is hooguit de geldende limiet
   //    (met tijdvoorwaarde) van de dichtste hoofdrijbaan in dezelfde richting binnen HOOFD_M.
+  // 3. Vangnet voor verbindingswegen: een link zonder hoofdrijbaan ernaast (de verbindingsweg in een
+  //    knooppunt, zoals op het Beneluxplein) staat in OSM vaak op 130 zonder voorwaarde, terwijl er in
+  //    werkelijkheid 80 of 100 geldt. Een link toont daarom nooit meer dan LINK_PLAFOND. Alleen als
+  //    een tijdvoorwaarde nu een hogere waarde geeft en het buiten LINK_OVERDAG is ('s nachts),
+  //    geldt die. Te laag tonen is veiliger dan te hoog. Per land aan te passen via de zone
+  //    (Kaart.zetZone); een land zonder eigen regel krijgt de standaard.
+  var LINK_PLAFOND = { standaard: 100, "Europe/Amsterdam": 100, "Europe/Brussels": 100 };
+  var LINK_OVERDAG = [6 * 60, 19 * 60]; // 06:00 tot 19:00 in de zone: dan geldt het plafond altijd
   var HOOFD_M = 60; // zo ver zoekt de link naar zijn hoofdrijbaan
   var VOORRANG_KMH = 80;
   var AFSLAG_HOEK = 12; // zo ver wijkt de koers af van de hoofdrijbaan bij een echte afslag
@@ -450,6 +494,12 @@
         var hoofdLim = limietVan(wegen[hr.idx], hr.vooruit, d);
         if (hoofdLim && hoofdLim.v != null && hoofdLim.v < lim.v) lim = { v: hoofdLim.v, voorwaarde: hoofdLim.voorwaarde, impliciet: hoofdLim.impliciet, begrensd: lim.v };
       }
+    }
+    // Vangnet voor verbindingswegen (regel 3), na de hoofdrijbaan.
+    if (isLink(wg.h) && lim && lim.v != null) {
+      var plafond = LINK_PLAFOND[ZONE] != null ? LINK_PLAFOND[ZONE] : LINK_PLAFOND.standaard;
+      var tm = tijdIn(d, ZONE).min, overdag = tm >= LINK_OVERDAG[0] && tm < LINK_OVERDAG[1];
+      if (lim.v > plafond && !(lim.voorwaarde && !overdag)) lim = { v: plafond, plafond: true, begrensd: lim.begrensd || lim.v };
     }
     return { id: wg.id, h: wg.h, d: Math.round(keuze.d), limiet: lim };
   }

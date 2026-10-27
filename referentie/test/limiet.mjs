@@ -18,7 +18,28 @@ is("A4 overdag 100", K._metVoorwaarde({ v: 100 }, "130 @ (19:00-06:00)", di).v, 
 is("A4 avond 130", K._metVoorwaarde({ v: 100 }, "130 @ (19:00-06:00)", avond).v, 130);
 is("Mo-Fr spits di 08:00", K._metVoorwaarde({ v: 80 }, "100 @ (Mo-Fr 06:00-10:00,15:00-19:00)", ochtend).v, 100);
 is("Mo-Fr spits za", K._metVoorwaarde({ v: 80 }, "100 @ (Mo-Fr 06:00-10:00,15:00-19:00)", za).v, 80);
-is("vrije tekst niet", K._metVoorwaarde({ v: 80 }, '100 @ Mo-Fr 06:00-10:00,15:00-19:00 "bij grote verkeersdrukte"', ochtend).v, 80);
+// Tekst tussen aanhalingstekens telt niet mee: dag en tijd gelden wel.
+const spits = '100 @ Mo-Fr 06:00-10:00,15:00-19:00 "bij grote verkeersdrukte"';
+is("vrije tekst: di 08:00 wel", K._metVoorwaarde({ v: 80 }, spits, ochtend).v, 100);
+is("vrije tekst: di 11:00 niet", K._metVoorwaarde({ v: 80 }, spits, di).v, 80);
+is("vrije tekst: za 08:00 niet", K._metVoorwaarde({ v: 80 }, spits, za).v, 80);
+is("vrije tekst: zo 17:00 niet", K._metVoorwaarde({ v: 80 }, spits, new Date("2026-11-01T17:00:00+01:00")).v, 80);
+is("vrije tekst: vr 17:00 wel", K._metVoorwaarde({ v: 80 }, spits, new Date("2026-10-30T17:00:00+01:00")).v, 100);
+// Dagen: lijsten, bereiken over het weekend, meer regels, PH en SH.
+const wo12 = new Date("2026-10-28T12:10:00+01:00"), di15 = new Date("2026-10-27T15:30:00+01:00");
+is("Mo,Tu ma-di wel", K._metVoorwaarde({ v: 50 }, "30 @ (Mo,Tu 15:20-15:55)", di15).v, 30);
+is("Mo,Tu wo niet", K._metVoorwaarde({ v: 50 }, "30 @ (Mo,Tu 15:20-15:55)", new Date("2026-10-28T15:30:00+01:00")).v, 50);
+is("Fr-Mo za wel", K._metVoorwaarde({ v: 50 }, "30 @ (Fr-Mo 08:00-09:00)", za).v, 30);
+is("Fr-Mo di niet", K._metVoorwaarde({ v: 50 }, "30 @ (Fr-Mo 08:00-09:00)", ochtend).v, 50);
+is("meer regels: wo 12:10", K._metVoorwaarde({ v: 50 }, "30 @ (Mo-Fr 08:20-08:35, Mo,Tu 15:20-15:55, We 11:20-12:30; PH off; SH off)", wo12).v, 30);
+is("meer regels: di 12:10 niet", K._metVoorwaarde({ v: 50 }, "30 @ (Mo-Fr 08:20-08:35, Mo,Tu 15:20-15:55, We 11:20-12:30; PH off; SH off)", new Date("2026-10-27T12:10:00+01:00")).v, 50);
+is("vervolg zonder @", K._metVoorwaarde({ v: 50 }, "5 @ Mo-Fr 08:10-08:40,15:20-15:50; We 08:10-08:40,11:55-12:25", wo12).v, 5);
+is("alleen dagen: za", K._metVoorwaarde({ v: 30 }, "30 @ flashing; 50 @ (Sa,Su,PH,SH)", za).v, 50);
+is("alleen dagen: di niet", K._metVoorwaarde({ v: 30 }, "30 @ flashing; 50 @ (Sa,Su,PH,SH)", di).v, 30);
+is("alleen SH telt niet", K._metVoorwaarde({ v: 30 }, "50 @ (SH)", di).v, 30);
+is("Sa off", K._metVoorwaarde({ v: 50 }, "30 @ (08:00-09:00; Sa off)", za).v, 50);
+is("spaties rond streepje", K._metVoorwaarde({ v: 50 }, "30 @ (Mo-Fr 07:50-08:45,11:00 - 13:00, 14:50 - 16:00; ", wo12).v, 30);
+is("maanden: onbekend, basis", K._metVoorwaarde({ v: 90 }, "70 @ (Apr 1-Oct 31)", di).v, 90);
 is("wet niet", K._metVoorwaarde({ v: 130 }, "100 @ wet", di).v, 130);
 // Tijdzone: de voorwaarde volgt de tijd in Europe/Amsterdam, niet de klok van het toestel.
 // 18:30 UTC is 19:30 in Amsterdam (wintertijd): al 130, ook als het toestel op UTC of New York staat.
