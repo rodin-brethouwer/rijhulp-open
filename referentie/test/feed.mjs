@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import assert from "node:assert/strict";
 import { maakServer, vakVan } from "../server/server.mjs";
-import { klopt, keur, naarB64url } from "../../protocol/feed.mjs";
+import { klopt, keur, naarB64url, leesBegrensd } from "../../protocol/feed.mjs";
 import { sqliteDb, migreer } from "../server/adapters/sqlite.mjs";
 
 const DB = sqliteDb(":memory:");
@@ -50,4 +50,22 @@ assert.equal(keur(j, { app: "proef-app", vak, nu: klok, landAan: () => false }).
 assert.equal(keur(j, { app: "andere-app", vak, nu: klok }).ok, false);
 assert.equal(keur(j, { app: "proef-app", vak, nu: klok + 10 * 60e3 }).ok, false);
 console.log("ok  keuren: landregels, verkeerde app en een oude feed");
+
+// M3 (review 26 okt): alleen bekende velden en een veilig id, stemmen van een vreemde app begrensd.
+{
+  const vies = { ...j, meldingen: [{ ...m, extra: "<img src=x onerror=alert(1)>" }, { ...m, id: "<b>1</b>" }], stemmen: [
+    { melding: "derde-app:7", ja: 0, nee: 50 }, { melding: "derde-app:8", ja: 9, nee: 0 },
+    { melding: "proef-app:" + m.id, ja: 0, nee: 5 }, { melding: "<x>:1", ja: 1, nee: 0 }, { melding: "derde-app:9", ja: -1, nee: 1 },
+  ] };
+  const kv = keur(vies, { app: "proef-app", vak, nu: klok });
+  assert.equal(kv.meldingen.length, 1, "id met HTML overgeslagen");
+  assert.ok(!("extra" in kv.meldingen[0]), "onbekend veld gaat niet door");
+  assert.deepEqual(kv.stemmen.map((x) => [x.melding, x.ja, x.nee]), [["derde-app:7", 0, 1], ["derde-app:8", 1, 0]], "per vreemde app hooguit 1 ja en 1 nee, geen stemmen op eigen meldingen");
+  assert.equal(keur({ ...j, stemmen: "x" }, { app: "proef-app", vak, nu: klok }).ok, false);
+  // Ophalen: een te grote body wordt niet helemaal ingelezen.
+  const groot = new Response(new ReadableStream({ start(c) { for (let i = 0; i < 400; i++) c.enqueue(new Uint8Array(1024)); c.close(); } }));
+  assert.equal(await leesBegrensd(groot, 256 * 1024), null);
+  assert.equal((await leesBegrensd(new Response("{}"), 256 * 1024)).length, 2);
+  console.log("ok  keuren: bekende velden, veilig id, vreemde stemmen begrensd, body met grens");
+}
 console.log("alles goed");

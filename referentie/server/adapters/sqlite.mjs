@@ -24,20 +24,24 @@ export function sqliteDb(bestand = ":memory:") {
         const r = sql.prepare(q).get(...args) ?? null;
         return kol ? (r?.[kol] ?? null) : r;
       },
-      run: async () => {
-        const r = sql.prepare(q).run(...args);
-        return { success: true, meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } };
-      },
+      run: async () => runNu(),
+      runNu,
     };
+    function runNu() {
+      const r = sql.prepare(q).run(...args);
+      return { success: true, meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } };
+    }
   }
   return {
     prepare: (q) => stmt(q),
     // Alles of niets, net als een batch hoort te zijn.
     async batch(lijst) {
+      // Zonder await tussen BEGIN en COMMIT: anders begint een parallel verzoek midden in deze
+      // transactie zijn eigen batch ("cannot start a transaction within a transaction").
       sql.exec("BEGIN");
       try {
         const uit = [];
-        for (const s of lijst) uit.push(await s.run());
+        for (const s of lijst) uit.push(s.runNu());
         sql.exec("COMMIT");
         return uit;
       } catch (e) {

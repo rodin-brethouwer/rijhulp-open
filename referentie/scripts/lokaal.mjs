@@ -13,8 +13,12 @@
 //   DATABASE_URL    een Postgres-adres; dan geen SQLite
 //   APP_ID          je id uit deelnemers.json
 //   FEED_SLEUTEL    de geheime sleutel voor de feed (uit scripts/maak-sleutel.mjs), als geheim bij je host
-//   RIJHULP_PROXY=1 achter een reverse proxy (nginx, Caddy, het platform): het IP komt dan uit
-//                   X-Forwarded-For in plaats van van de verbinding
+//   RIJHULP_PROXY=1 achter één reverse proxy (nginx, Caddy, het platform): het IP komt dan uit het
+//                   laatste adres in X-Forwarded-For (dat de proxy zelf toevoegt; de rest kan de
+//                   bezoeker verzinnen) in plaats van van de verbinding
+//   RIJHULP_IP_KOP  de kop met het echte IP die je proxy zet, bijvoorbeeld cf-connecting-ip achter
+//                   Cloudflare of x-real-ip uit nginx; gaat voor RIJHULP_PROXY. Alleen zetten als
+//                   elk verzoek langs die proxy moet, anders kiest de bezoeker zijn eigen IP.
 //   RIJHULP_KLOK=1  zet POST /__klok {"plus_min": 200} aan om de klok te verschuiven, alleen voor een proef
 import http from "node:http";
 import fs from "node:fs";
@@ -54,7 +58,9 @@ http.createServer(async (req, res) => {
   if (process.env.RIJHULP_KLOK === "1" && url.pathname === "/__klok" && req.method === "POST") { plus += (JSON.parse(body.toString() || "{}").plus_min || 0) * 60e3; res.end(JSON.stringify({ plus_min: plus / 60e3 })); return; }
   if (url.pathname.startsWith("/api/") || url.pathname === "/feed") {
     const kop = new Headers(); for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") kop.set(k, v);
-    const doorgegeven = process.env.RIJHULP_PROXY === "1" ? String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() : "";
+    const ipKop = (process.env.RIJHULP_IP_KOP || "").toLowerCase();
+    const doorgegeven = ipKop ? String(req.headers[ipKop] || "").trim()
+      : process.env.RIJHULP_PROXY === "1" ? String(req.headers["x-forwarded-for"] || "").split(",").pop().trim() : "";
     kop.set("x-real-ip", doorgegeven || req.socket.remoteAddress || "");
     kop.delete("cf-connecting-ip");
     const r = await server.fetch(new Request(url, { method: req.method, headers: kop, body: ["GET", "HEAD"].includes(req.method) ? undefined : body }), env, null);

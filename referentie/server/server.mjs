@@ -205,7 +205,7 @@ export function leesMsi(xml, idLengte = 8) {
 
 /** Haalt de feed op en leest hem; geeft { t, bron, borden, etag } of gooit. */
 async function haalMsiFeed(doeFetch, vorige, t) {
-  const kop = { "User-Agent": "blitzla/1.0 (blitzla.hypamoon.app)" };
+  const kop = { "User-Agent": "rijhulp-open/0.1 (+https://github.com/rodin-brethouwer/rijhulp-open)" };
   if (vorige && vorige.etag) kop["If-None-Match"] = vorige.etag;
   // De minuut in de query: zonder die gaf een fetch vanuit Cloudflare een kopie uit de cache
   // van een kwartier oud terug (.gz valt daar onder de standaardcache), gemeten 25 okt 2026.
@@ -276,11 +276,14 @@ export function maakServer(opties = {}) {
     if (!b) return fout(400, "body");
     const db = env.DB, t = nu();
     const w = await wie(req, db, "", t);
-    const tel = async (kolom, waarde) => Number((await db.prepare(`SELECT COUNT(*) AS n FROM acties WHERE soort = 'toestel' AND ${kolom} = ? AND t > ?`).bind(waarde, t - 24 * 3600e3).first()).n);
-    if ((await tel("ip", w.ip)) >= REGELS.toestellenPerIpDag || (await tel("net", w.net)) >= REGELS.toestellenPerNetDag) return fout(429, "dag_vol");
     const dag = String(dagNr(t)).padStart(5, "0"), r = willekeurig().slice(0, 16);
     const id = "b" + dag + r + (await tekenId(db, dag + r));
-    await db.prepare("INSERT INTO acties (soort, toestel, vinger, t, ip, net) VALUES ('toestel', ?, ?, ?, ?, ?)").bind(await sha("uitgifte|" + id), w.vinger, t, w.ip, w.net).run();
+    const sinds = t - 24 * 3600e3;
+    const nee = await boek(db, "toestel", { ...w, toestel: await sha("uitgifte|" + id) }, t, [
+      ["ip", w.ip, sinds, REGELS.toestellenPerIpDag, "dag_vol"],
+      ["net", w.net, sinds, REGELS.toestellenPerNetDag, "dag_vol"],
+    ]);
+    if (nee) return fout(429, nee);
     return antwoord(201, { toestel: id });
   }
 
@@ -305,6 +308,21 @@ export function maakServer(opties = {}) {
       db.prepare("DELETE FROM acties WHERE t < ?").bind(t - 26 * 3600e3),
       db.prepare("DELETE FROM zout WHERE dag <> ?").bind(dag),
     ]);
+  }
+  /** L2 (review 26 okt): eerst de actie boeken en dan tellen, met de eigen rij erbij. Zo glipt een
+   *  reeks parallelle verzoeken niet samen onder een grens door. grenzen: [kolom, waarde, sinds, max,
+   *  code]. Te veel: de eigen rij weer weg en de code terug; anders null. */
+  async function boek(db, soort, w, t, grenzen) {
+    await db.prepare("INSERT INTO acties (soort, toestel, vinger, t, ip, net) VALUES (?, ?, ?, ?, ?, ?)").bind(soort, w.toestel, w.vinger, t, w.ip, w.net).run();
+    for (const [kolom, waarde, sinds, max, code] of grenzen) {
+      const n = Number((await db.prepare(`SELECT COUNT(*) AS n FROM acties WHERE soort = ? AND ${kolom} = ? AND t > ?`).bind(soort, waarde, sinds).first()).n);
+      if (n > max) {
+        // Zonder rowid, zodat het ook op Postgres werkt: een rij die in alles gelijk is, is dezelfde actie.
+        await db.prepare("DELETE FROM acties WHERE soort = ? AND toestel = ? AND vinger = ? AND t = ? AND ip = ? AND net = ?").bind(soort, w.toestel, w.vinger, t, w.ip, w.net).run();
+        return code;
+      }
+    }
+    return null;
   }
   function vorm(r) {
     return { id: r.id, lat: r.lat, lon: r.lon, koers: r.koers, gemaakt: r.gemaakt, verloopt: r.verloopt, ja: r.ja, nee: r.nee, laatste_ja: r.laatste_ja };
@@ -357,19 +375,23 @@ export function maakServer(opties = {}) {
     const id = await keurToestel(db, b.toestel, t);
     if (!id) return fout(400, "toestel");
     const w = { ...(await wie(req, db, b.toestel, t)), vers: id.vers };
-    // Limieten: per toestel geen reeks en een maximum per dag; per vingerafdruk ruimer.
-    const tel = async (kolom, waarde, sinds) => Number((await db.prepare(`SELECT COUNT(*) AS n FROM acties WHERE soort = 'meld' AND ${kolom} = ? AND t > ?`).bind(waarde, sinds).first()).n);
+    // Limieten: per toestel geen reeks en een maximum per dag; per vingerafdruk ruimer; per IP-hash
+    // en per net los van toestel-id en browser (die kiest de client zelf).
     const laatste = await db.prepare("SELECT MAX(t) AS t FROM acties WHERE soort = 'meld' AND toestel = ?").bind(w.toestel).first();
     if (laatste && laatste.t && t - laatste.t < REGELS.tussenMin * 60e3) return fout(429, "te_snel", { "Retry-After": String(Math.ceil((REGELS.tussenMin * 60e3 - (t - laatste.t)) / 1000)) });
-    if ((await tel("toestel", w.toestel, t - 24 * 3600e3)) >= (id.vers ? REGELS.versPerDag : REGELS.perToestelDag)) return fout(429, "dag_vol");
-    if ((await tel("vinger", w.vinger, t - 10 * 60e3)) >= REGELS.perVingerTienMin) return fout(429, "te_snel");
-    if ((await tel("vinger", w.vinger, t - 24 * 3600e3)) >= REGELS.perVingerDag) return fout(429, "dag_vol");
-    if ((await tel("ip", w.ip, t - 3600e3)) >= REGELS.perIpUur) return fout(429, "te_snel");
-    if ((await tel("ip", w.ip, t - 24 * 3600e3)) >= REGELS.perIpDag) return fout(429, "dag_vol");
-    if ((await tel("net", w.net, t - 3600e3)) >= REGELS.perNetUur) return fout(429, "te_snel");
-    if ((await tel("net", w.net, t - 24 * 3600e3)) >= REGELS.perNetDag) return fout(429, "dag_vol");
+    const uur = t - 3600e3, dag = t - 24 * 3600e3;
+    const nee = await boek(db, "meld", w, t, [
+      ["toestel", w.toestel, t - REGELS.tussenMin * 60e3, 1, "te_snel"],
+      ["toestel", w.toestel, dag, id.vers ? REGELS.versPerDag : REGELS.perToestelDag, "dag_vol"],
+      ["vinger", w.vinger, t - 10 * 60e3, REGELS.perVingerTienMin, "te_snel"],
+      ["vinger", w.vinger, dag, REGELS.perVingerDag, "dag_vol"],
+      ["ip", w.ip, uur, REGELS.perIpUur, "te_snel"],
+      ["ip", w.ip, dag, REGELS.perIpDag, "dag_vol"],
+      ["net", w.net, uur, REGELS.perNetUur, "te_snel"],
+      ["net", w.net, dag, REGELS.perNetDag, "dag_vol"],
+    ]);
+    if (nee) return fout(429, nee);
     await opruimen(db, t);
-    await db.prepare("INSERT INTO acties (soort, toestel, vinger, t, ip, net) VALUES ('meld', ?, ?, ?, ?, ?)").bind(w.toestel, w.vinger, t, w.ip, w.net).run();
     vergeetVak(lat, lon);
     // Staat er al een vlakbij in dezelfde richting? Dan telt dit als een ja.
     const dLat = REGELS.samenM / 111000, dLon = REGELS.samenM / (111000 * Math.cos(lat * rad));
@@ -381,8 +403,9 @@ export function maakServer(opties = {}) {
       return antwoord(200, { samengevoegd: true, melding: vorm(r) });
     }
     const verloopt = t + REGELS.basisMin * 60e3;
+    // M2: op 4 decimalen (ca. 11 m), zoals PROTOCOL.md voorschrijft; meer is niet nodig voor een melding.
     const rij = await db.prepare("INSERT INTO meldingen (lat, lon, koers, gemaakt, verloopt, ja, nee, laatste_ja, melder) VALUES (?, ?, ?, ?, ?, 0, 0, NULL, ?) RETURNING *")
-      .bind(Math.round(lat * 1e5) / 1e5, Math.round(lon * 1e5) / 1e5, koers, t, verloopt, w.toestel).first();
+      .bind(Math.round(lat * 1e4) / 1e4, Math.round(lon * 1e4) / 1e4, koers, t, verloopt, w.toestel).first();
     return antwoord(201, { melding: vorm(rij) });
   }
 
@@ -408,8 +431,11 @@ export function maakServer(opties = {}) {
     else {
       nNee++;
       // Meteen weg alleen door nee van verschillende IP-hashes (H2): tien toestel-ids achter één IP
-      // tellen als één. Stemmen van een toestel-id van vandaag tellen hier niet mee.
-      const andereIps = eigen ? 0 : Number((await db.prepare("SELECT COUNT(DISTINCT ip) AS n FROM stemmen WHERE melding = ? AND ja = 0 AND vers = 0 AND ip IS NOT NULL AND toestel <> ?").bind(rij.id, rij.melder).first()).n);
+      // tellen als één. Stemmen van een toestel-id van vandaag tellen hier niet mee, en alleen nee
+      // van dezelfde UTC-dag: na middernacht heeft hetzelfde IP met het nieuwe dagzout een andere
+      // hash, en zou het anders twee keer tellen.
+      const dagBegin = dagNr(t) * 86400e3;
+      const andereIps = eigen ? 0 : Number((await db.prepare("SELECT COUNT(DISTINCT ip) AS n FROM stemmen WHERE melding = ? AND ja = 0 AND vers = 0 AND ip IS NOT NULL AND toestel <> ? AND t >= ?").bind(rij.id, rij.melder, dagBegin).first()).n);
       if (eigen || (andereIps >= REGELS.neeWeg && nNee > nJa)) verloopt = t; // de melder weet het het best
       else verloopt = Math.min(verloopt, t + (nNee > nJa ? REGELS.neeMin : REGELS.jaMin) * 60e3);
     }
@@ -428,14 +454,15 @@ export function maakServer(opties = {}) {
     const w = { ...(await wie(req, db, b.toestel, t)), vers: tid.vers };
     const eigen = rij.melder === w.toestel;
     if (eigen && t - rij.gemaakt < REGELS.eigenNaMin * 60e3) return fout(409, "eigen", { "Retry-After": String(Math.ceil((rij.gemaakt + REGELS.eigenNaMin * 60e3 - t) / 1000)) });
-    const n = Number((await db.prepare("SELECT COUNT(*) AS n FROM acties WHERE soort = 'stem' AND toestel = ? AND t > ?").bind(w.toestel, t - 24 * 3600e3).first()).n);
-    if (n >= REGELS.stemmenPerToestelDag) return fout(429, "dag_vol");
-    const telStem = async (kolom, waarde, sinds) => Number((await db.prepare(`SELECT COUNT(*) AS n FROM acties WHERE soort = 'stem' AND ${kolom} = ? AND t > ?`).bind(waarde, sinds).first()).n);
-    if ((await telStem("ip", w.ip, t - 3600e3)) >= REGELS.stemmenPerIpUur) return fout(429, "te_snel");
-    if ((await telStem("net", w.net, t - 3600e3)) >= REGELS.stemmenPerNetUur) return fout(429, "te_snel");
     const al = await db.prepare("SELECT t FROM stemmen WHERE melding = ? AND toestel = ?").bind(id, w.toestel).first();
     if (al && (!eigen || !eigenMag(rij, al.t, t))) return antwoord(200, { al: true, melding: vorm(rij) });
-    await db.prepare("INSERT INTO acties (soort, toestel, vinger, t, ip, net) VALUES ('stem', ?, ?, ?, ?, ?)").bind(w.toestel, w.vinger, t, w.ip, w.net).run();
+    // H2: per toestel per dag, en per IP-hash en per net per uur, los van toestel-id en browser.
+    const nee = await boek(db, "stem", w, t, [
+      ["toestel", w.toestel, t - 24 * 3600e3, REGELS.stemmenPerToestelDag, "dag_vol"],
+      ["ip", w.ip, t - 3600e3, REGELS.stemmenPerIpUur, "te_snel"],
+      ["net", w.net, t - 3600e3, REGELS.stemmenPerNetUur, "te_snel"],
+    ]);
+    if (nee) return fout(429, nee);
     const nieuw = await stemOp(db, rij, w, b.ja, t);
     vergeetVak(rij.lat, rij.lon);
     return antwoord(200, { melding: { ...vorm(nieuw), weg: nieuw.verloopt <= t } });

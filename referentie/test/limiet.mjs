@@ -55,5 +55,18 @@ K.zetZone("Europe/Brussels");
 is("zone Brussel", K.zone(), "Europe/Brussels");
 is("19:30 Brussel is 130", K._metVoorwaarde({ v: 100 }, "130 @ (19:00-06:00)", new Date("2026-10-26T18:30:00Z")).v, 130);
 K.zetZone("Europe/Amsterdam");
+// A12 Zoetermeer richting Den Haag (27 okt 2026, 17:20): de trajectcontrole in de echte data heeft
+// 100 en "130 @ (19:00-06:00)". De voorwaarde zelf klopt; de 130 kwam uit een begin op een andere
+// tijd. Alleen als de data gebouwd is (site/data/ staat niet in de repo).
+const flBestand = new URL("data/flitsers.json", site);
+const fl = fs.existsSync(flBestand) ? JSON.parse(fs.readFileSync(flBestand, "utf8")) : null;
+const a12z = fl && fl.t.find((t) => Math.abs(t.a[0] - 52.05041) < 1e-4 && Math.abs(t.a[1] - 4.44402) < 1e-4);
+if (a12z) {
+  is("A12 Zoetermeer-traject in de data", [a12z.m, a12z.mc, a12z.km], [100, "130 @ (19:00-06:00)", 2.4]);
+  is("A12 traject 17:20 is 100", K._metVoorwaarde({ v: a12z.m }, a12z.mc, new Date("2026-10-27T17:20:00+01:00")).v, 100);
+  is("A12 traject 18:59 is 100", K._metVoorwaarde({ v: a12z.m }, a12z.mc, new Date("2026-10-27T18:59:00+01:00")).v, 100);
+  is("A12 traject 19:00 is 130", K._metVoorwaarde({ v: a12z.m }, a12z.mc, new Date("2026-10-27T19:00:00+01:00")).v, 130);
+  is("A12 traject 05:59 is 130", K._metVoorwaarde({ v: a12z.m }, a12z.mc, new Date("2026-10-27T05:59:00+01:00")).v, 130);
+} else console.log("--   A12 met echte data overgeslagen (site/data/flitsers.json nog niet gebouwd)");
 console.log(fout ? `${fout} fout` : "alles goed");
 process.exit(fout ? 1 : 0);

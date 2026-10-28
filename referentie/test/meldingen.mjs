@@ -360,6 +360,77 @@ console.log("ok  net van IPv4 (/24) en IPv6 (/48)");
   assert.equal(x.status, 201, "eigen site met JSON mag");
   console.log("ok  POST alleen als JSON en van de eigen site (415 en 403)");
 }
+// Aanvalsproef (review 26 okt, H1 en H2): een script vanaf één IP dat per verzoek een nieuw
+// toestel-id en een nieuwe browser gebruikt, achter elkaar of tegelijk, kan niet massaal melden of
+// wegstemmen. 203.0.113.0/24 is een documentatienet.
+{
+  const AANVALLER = "203.0.113.7";
+  const kop = (ip, ua) => ({ "x-real-ip": ip, "user-agent": ua, "content-type": "application/json", origin: "https://rijhulp.example", "sec-fetch-site": "same-origin" });
+  // Een trage database zoals D1 over het net: elke query wacht 0 tot 4 ms, zodat parallelle
+  // verzoeken echt door elkaar lopen (L2: eerst tellen en dan boeken liet zo een burst door).
+  const traag = (st) => ({ st, bind: (...a) => traag(st.bind(...a)), all: async () => { await new Promise((r) => setTimeout(r, Math.random() * 4)); return st.all(); }, first: async (k) => { await new Promise((r) => setTimeout(r, Math.random() * 4)); return st.first(k); }, run: async () => { await new Promise((r) => setTimeout(r, Math.random() * 4)); return st.run(); } });
+  const trageEnv = { DB: { prepare: (q) => traag(DB.prepare(q)), batch: (l) => DB.batch(l.map((x) => x.st || x)) } };
+  const post = async (pad, body, ip, ua, e = env) => { const x = await server.fetch(new Request("https://rijhulp.example" + pad, { method: "POST", body: JSON.stringify(body), headers: kop(ip, ua) }), e, null); return { status: x.status, j: await x.json() }; };
+  const nieuwId = async (ip, ua) => (await post("/api/toestel", {}, ip, ua)).j.toestel || null;
+
+  // 1. Achter elkaar: elk verzoek een nieuw id van de server en een nieuwe UA.
+  klok = Date.parse("2027-03-01T08:00:00Z");
+  let ids = 0, gemeld = 0;
+  for (let i = 0; i < 200; i++) {
+    const ua = "Mozilla/5.0 bot-" + i;
+    const id = await nieuwId(AANVALLER, ua);
+    if (id) ids++;
+    const x = await post("/api/meldingen", { toestel: id || "geen-id-xxxxxxxxxxxx", lat: 52.0 + (i % 50) * 0.005, lon: 4.3 + Math.floor(i / 50) * 0.01, koers: 0 }, AANVALLER, ua);
+    if (x.status === 201) gemeld++;
+    klok += 15e3; // 200 pogingen in 50 minuten
+  }
+  assert.equal(ids, REGELS.toestellenPerIpDag, "nieuwe ids per IP per dag");
+  assert.ok(gemeld <= REGELS.toestellenPerIpDag * REGELS.versPerDag && gemeld <= REGELS.perIpUur, "achter elkaar gemeld: " + gemeld);
+
+  // 2. Tegelijk: 40 verzoeken in één keer, met ids die het script eerder (andere dagen) verzamelde.
+  klok = Date.parse("2027-03-02T08:00:00Z");
+  const oud = [];
+  for (let i = 0; i < 40; i++) oud.push(await echt("aanval-oud-" + i));
+  const tegelijk = await Promise.all(oud.map((id, i) => post("/api/meldingen", { toestel: id, lat: 51.6 + i * 0.01, lon: 5.0, koers: 0 }, AANVALLER, "bot-p-" + i, trageEnv)));
+  const ok = tegelijk.filter((x) => x.status === 201).length;
+  assert.ok(ok >= 1 && ok <= REGELS.perIpUur, "tegelijk gemeld: " + ok);
+  assert.ok((await tel("SELECT COUNT(*) AS n FROM acties WHERE soort = 'meld' AND t = ?", klok)) <= REGELS.perIpUur, "geweigerde verzoeken tellen niet als actie");
+
+  // 3. Wegstemmen: een echte melding, dan nee van het script, met verse en oude ids, achter elkaar en tegelijk.
+  klok = Date.parse("2027-03-03T08:00:00Z");
+  const doel = await post("/api/meldingen", { toestel: await echt("echte-melder-xxxxxxxxxx"), lat: 52.3, lon: 4.8, koers: 90 }, "198.51.100.20", "Tesla");
+  assert.equal(doel.status, 201, JSON.stringify(doel.j));
+  const did = doel.j.melding.id;
+  let laatst = null;
+  for (let i = 0; i < 10; i++) { const id = await nieuwId(AANVALLER, "bot-v-" + i); if (id) laatst = await post(`/api/meldingen/${did}/stem`, { toestel: id, ja: false }, AANVALLER, "bot-v-" + i); }
+  const nee = await Promise.all(oud.map((id, i) => post(`/api/meldingen/${did}/stem`, { toestel: id, ja: false }, AANVALLER, "bot-n-" + i, trageEnv)));
+  assert.ok(nee.filter((x) => x.status === 200).length <= REGELS.stemmenPerIpUur, "nee tegelijk binnen de stemlimiet");
+  const nu1 = await DB.prepare("SELECT verloopt, nee FROM meldingen WHERE id = ?").bind(did).first();
+  assert.ok(Number(nu1.verloopt) > klok, "melding niet weggestemd vanaf één IP");
+  assert.ok(Number(nu1.nee) <= REGELS.stemmenPerIpUur, "nee geteld: " + nu1.nee);
+  assert.ok(laatst, "het script kreeg wel ids");
+
+  // 4. Tegelijk stemmen op veel meldingen: binnen de stemlimiet per IP.
+  klok = Date.parse("2027-03-04T08:00:00Z");
+  const doelen = [];
+  for (let i = 0; i < 40; i++) doelen.push((await post("/api/meldingen", { toestel: await echt("melder-" + i + "-xxxxxxxxxx"), lat: 51.4 + i * 0.01, lon: 5.9, koers: 0 }, "198.51." + (101 + (i % 50)) + ".1", "Tesla")).j.melding.id);
+  const ss = await Promise.all(doelen.map((m, i) => post(`/api/meldingen/${m}/stem`, { toestel: oud[i], ja: false }, AANVALLER, "bot-s-" + i, trageEnv)));
+  const okS = ss.filter((x) => x.status === 200).length;
+  assert.ok(okS >= 1 && okS <= REGELS.stemmenPerIpUur, "stemmen tegelijk: " + okS);
+
+  // 5. Rond middernacht (UTC): hetzelfde IP heeft na de wissel van het dagzout een andere hash, maar
+  // nee van voor en na middernacht tellen samen niet als twee IP's.
+  klok = Date.parse("2027-03-05T23:50:00Z");
+  const m5 = await post("/api/meldingen", { toestel: await echt("nacht-melder-xxxxxxxxxx"), lat: 52.05, lon: 4.45, koers: 0 }, "198.51.100.30", "Tesla");
+  klok = Date.parse("2027-03-05T23:58:00Z");
+  await post(`/api/meldingen/${m5.j.melding.id}/stem`, { toestel: oud[0], ja: false }, AANVALLER, "bot-1");
+  klok = Date.parse("2027-03-06T00:02:00Z");
+  const x5 = await post(`/api/meldingen/${m5.j.melding.id}/stem`, { toestel: oud[0], ja: false }, AANVALLER, "bot-2");
+  const x6 = await post(`/api/meldingen/${m5.j.melding.id}/stem`, { toestel: oud[1], ja: false }, AANVALLER, "bot-3");
+  assert.equal(x5.status, 200); assert.equal(x6.status, 200);
+  assert.ok(!x6.j.melding.weg, "nee rond middernacht van één IP haalt niets weg");
+  console.log(`ok  aanvalsproef: één IP met nieuwe ids en UA's meldt ${gemeld}x achter elkaar en ${ok}x tegelijk, stemt hooguit ${REGELS.stemmenPerIpUur} per uur en haalt niets weg`);
+}
 // Het geplande opruimen (scheduled, elk uur) wist ook zonder nieuwe melding: later zijn
 // meldingen, stemmen, codes en het oude dagzout weg (ook die uit 2028 hierboven).
 {

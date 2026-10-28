@@ -76,6 +76,72 @@ een schijf: `RIJHULP_DB` op een pad op die schijf.
 De referentie-implementatie is Blitzla, op https://blitzla.hypamoon.app. Dat is de eigen app
 van de maker van dit project, niet meer dan een voorbeeld.
 
+### Hoe het werkt
+
+- **De browser in de auto.** Alles draait als gewone webpagina, gemaakt voor de browser van de
+  Tesla (Chromium, zonder app-store) en bruikbaar op elke telefoon. Snelheid en koers komen uit de
+  Geolocation API. De rit loopt op een eigen klok (de monotone klok van de pagina, nooit terug),
+  omdat `pos.timestamp` in de auto soms terugloopt of uit een andere klok komt.
+- **Offline met een service worker.** De site, de kaart en de flitsers staan na het eerste bezoek
+  in de cache: de site met stale-while-revalidate, de kaartvakken cache-first per stand (een nieuwe
+  bouw geeft nieuwe URL's). `/api/` gaat nooit via de cache.
+- **Data.** Limieten, flitspalen, roodlichtcamera's en trajectcontroles komen uit OpenStreetMap
+  (© OpenStreetMap-bijdragers, ODbL). Scripts in `referentie/scripts/` bouwen daaruit vooraf
+  vakken van ca. 22 x 20 km (wegen als polyline, met `maxspeed`, `maxspeed:conditional` en
+  richting); buiten die vakken vraagt de app de openbare Overpass-servers. Tijdvoorwaarden
+  ("130 @ (19:00-06:00)") rekenen in de tijdzone van het land. Matrixborden boven de snelweg (NL)
+  komen uit de open data van NDW (CC0 1.0), via de eigen server omdat die feed geen CORS heeft.
+  De app noemt de bronnen in de voet en op `over.html`; wie de data verspreidt, houdt die
+  vermelding en de ODbL aan.
+- **Geluid.** De Tesla-browser heeft geen stemmen voor `speechSynthesis`. Daarom zijn de zinnen
+  vooraf ingesproken en als één Ogg Opus per taal gebundeld; de app plant ze op de klok van Web
+  Audio. Een wachtrij zorgt dat meldingen nooit door elkaar praten en dat een zin die door een
+  hapering te laat zou komen, wegvalt in plaats van later alsnog te klinken.
+- **Aankondigingen.** Een flitspaal of gemelde flitser wordt vooraf gemeld op 500, 300 of 150 m
+  (afhankelijk van de snelheid), een trajectcontrole op 1000 of 500 m, alleen in de rijrichting. Elke aankondiging klinkt
+  hooguit één keer per plek en richting, ook na herladen of in een tweede tabblad (bewaard in
+  localStorage). Waar OSM meer trajecten op dezelfde plek heeft (hoofd- en parallelrijbaan) telt
+  het als één.
+- **Gemiddelde bij een trajectcontrole.** De app legt van begin tot einde een lijn over de wegdelen
+  van het traject en projecteert de auto daarop. Het gemiddelde is de afstand langs die lijn sinds
+  het begin, gedeeld door de tijd sinds het begin. Ruis opzij telt dus niet mee, GPS-sprongen
+  worden genegeerd, en stilstand in de file telt mee zoals bij de echte meting. Een getal staat er
+  pas na 15 s en 300 m. Gaat de app halverwege aan, dan meet hij vanaf daar ("gem. volgt") en noemt
+  hij bij het einde geen getal.
+- **Gemelde flitsers.** Eén tik legt plek en rijrichting vast; anderen krijgen daar een melding en
+  na het langsrijden de vraag of hij er nog staat. Ja verlengt, nee verkort. Geen account: de
+  server geeft een ondertekend toestel-id uit. In de database staan geen IP-adressen of
+  toestel-ids, alleen hashes met een zout dat elke dag wisselt en daarna wordt gewist.
+- **Tegen misbruik, in grote lijnen.** Schrijven kan alleen als JSON van de eigen site; toestel-ids
+  komen van de server en worden per netwerk beperkt uitgegeven; melden en stemmen hebben limieten
+  per toestel, per netwerkadres en per net, die los staan van wat de client meestuurt; een melding
+  verdwijnt alleen meteen door nee van verschillende netwerken. De precieze regels staan in
+  `PROTOCOL.md`, hoofdstuk 5 en 8, en in `REGELS` in `referentie/server/server.mjs`.
+
+### Lokaal draaien en testen
+
+Node 22.5 of nieuwer, geen pakketten nodig.
+
+    npm test                                   # server, feed, limieten, afritten, adapters, matrixborden
+    node referentie/test/geluid.mjs            # de wachtrij van het geluid tegen een nep-AudioContext
+
+Voor de site zelf bouw je eerst de data (RECEPT.md, stap 3: kaart, flitsers en grenzen uit een
+Geofabrik-extract met osmium, geluid met je eigen ingesproken zinnen). Daarna:
+
+    npm run lokaal                             # http://localhost:8787, site plus /api op SQLite in het geheugen
+    node referentie/test/rit.mjs n209          # een proefrit zonder browser (na maak-simroute.mjs)
+    node referentie/test/traject.mjs           # trajectcontrole: één aankondiging, het gemiddelde
+    node referentie/test/ruis.mjs              # hetzelfde met GPS-ruis, sprongen, stiltes en herladen
+
+### Proefrit
+
+`?sim=<naam>` speelt een nep-GPS-reeks af uit `site/sim/<naam>.json` (10 posities per seconde),
+gemaakt met `referentie/scripts/maak-simroute.mjs` langs een echte weg. Opties: `&x=3` sneller,
+`&kmh=100` een andere snelheid, `&uur=17:20` rijden op dat uur (voor tijdvoorwaarden), `&ruis=1`
+GPS zoals in de auto (tijd heen en weer, herhaalde posities, sprongen), `&debug=1` de staat en het
+log op het scherm. Op een echte site meldt en stemt een proefrit niet; alleen lokaal kun je met
+`&toestel=<naam>` een tweede gebruiker naspelen.
+
 ### Gratis
 
 De rijhulp is bedoeld als gratis hulpmiddel. De code staat onder MIT, het protocol en de
@@ -176,6 +242,71 @@ point `RIJHULP_DB` at a path on that disk.
 
 The reference implementation is Blitzla, at https://blitzla.hypamoon.app. It is the project
 maker's own app and nothing more than an example.
+
+### How it works
+
+- **The car's browser.** It is a plain web page, built for the Tesla browser (Chromium, no app
+  store) and usable on any phone. Speed and heading come from the Geolocation API. A drive runs on
+  its own clock (the page's monotonic clock, never backwards), because `pos.timestamp` in the car
+  sometimes runs backwards or comes from another clock.
+- **Offline via a service worker.** After the first visit the site, the map and the cameras are
+  cached: the site stale-while-revalidate, map tiles cache-first per build (a new build gets new
+  URLs). `/api/` never goes through the cache.
+- **Data.** Limits, speed cameras, red light cameras and average speed checks come from
+  OpenStreetMap (© OpenStreetMap contributors, ODbL). Scripts in `referentie/scripts/` prebuild
+  tiles of about 22 x 20 km (roads as polylines with `maxspeed`, `maxspeed:conditional` and
+  direction); outside those tiles the app asks the public Overpass servers. Time conditions
+  ("130 @ (19:00-06:00)") use the country's time zone. Overhead motorway signs (NL) come from NDW
+  open data (CC0 1.0), through the app's own server since that feed has no CORS. The app credits
+  its sources in the footer and on `over.html`; if you redistribute the data, keep that credit and
+  the ODbL.
+- **Audio.** The Tesla browser has no `speechSynthesis` voices, so the phrases are prerecorded and
+  bundled as one Ogg Opus per language, scheduled on the Web Audio clock. A queue makes sure
+  alerts never talk over each other, and a phrase that a stall would make late is dropped instead
+  of playing later.
+- **Alerts.** A fixed or reported camera is announced at 500, 300 or 150 m (depending on speed),
+  an average speed check at 1000 or 500 m, only in the driving direction. Each alert plays at most once per
+  place and direction, also after a reload or in a second tab (kept in localStorage). Where OSM has
+  several sections at the same spot (main and parallel carriageway) they count as one.
+- **Average speed in a section check.** The app lays a line along the section's road segments from
+  start to end and projects the car onto it. The average is the distance along that line since the
+  start divided by the time since the start, so sideways noise does not count, GPS jumps are
+  ignored, and standing still in a queue counts just as in the real measurement. A number shows
+  after 15 s and 300 m. If the app starts halfway, it measures from there ("avg follows") and does
+  not announce a number at the end.
+- **Reported cameras.** One tap stores position and heading; others get an alert there and, after
+  passing, the question whether it is still there. Yes extends, no shortens. No account: the server
+  issues a signed device id. The database holds no IP addresses or device ids, only hashes with a
+  salt that changes daily and is then deleted.
+- **Abuse, in broad strokes.** Writes are accepted only as JSON from the app's own site; device
+  ids come from the server and are issued sparingly per network; reports and votes are limited per
+  device, per network address and per network range, independent of anything the client sends; a
+  report only disappears at once on no votes from different networks. The exact rules are in
+  `PROTOCOL.md`, chapters 5 and 8, and in `REGELS` in `referentie/server/server.mjs`.
+
+### Running and testing locally
+
+Node 22.5 or newer, no packages needed.
+
+    npm test                                   # server, feed, limits, exits, adapters, overhead signs
+    node referentie/test/geluid.mjs            # the audio queue against a fake AudioContext
+
+For the site itself, build the data first (RECEPT.md, step 3: map, cameras and borders from a
+Geofabrik extract with osmium, audio with your own recorded phrases). Then:
+
+    npm run lokaal                             # http://localhost:8787, site plus /api on in-memory SQLite
+    node referentie/test/rit.mjs n209          # a test drive without a browser (after maak-simroute.mjs)
+    node referentie/test/traject.mjs           # section control: one announcement, the average
+    node referentie/test/ruis.mjs              # the same with GPS noise, jumps, silences and reloads
+
+### Test drive
+
+`?sim=<name>` plays a fake GPS track from `site/sim/<name>.json` (10 positions per second), made
+with `referentie/scripts/maak-simroute.mjs` along a real road. Options: `&x=3` faster, `&kmh=100`
+another speed, `&uur=17:20` drive at that time of day (for time conditions), `&ruis=1` GPS as in
+the car (time going back and forth, repeated positions, jumps), `&debug=1` state and log on screen.
+On a real site a test drive does not report or vote; only locally can `&toestel=<name>` simulate a
+second user.
 
 ### Free
 

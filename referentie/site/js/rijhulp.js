@@ -21,7 +21,7 @@
       titel: "Rijhulp", uitleg: "Je snelheid, de limiet van de weg en een melding vooraf bij flitspalen en trajectcontroles. Met geluid, zodat je op de weg kunt blijven letten.",
       start: "Start", klein: "Gratis, zonder account. Je positie gaat alleen mee als je zelf een flitser meldt.", kmh: "km/h",
       flitser: "Flitser", rood: "Roodlichtcamera", flitserRood: "Flitser en rood licht", max: "max",
-      traject: "Trajectcontrole", gemiddeld: "gemiddeld", gem: "gem.", nog: "nog", over: "over", km: "km",
+      traject: "Trajectcontrole", gemiddeld: "gemiddeld", gem: "gem.", gemVolgt: "gem. volgt", nog: "nog", over: "over", km: "km",
       aan: "flitsers aan", uit: "flitsers uit", buiten: "Ander land", gpsZoekt: "GPS zoekt", gps: "GPS",
       geluidAan: "Geluid aan", geluidUit: "Geluid uit", test: "Test geluid", scherm: "Volledig scherm", info: "Info",
       laden: "Kaart ophalen", geenLimiet: "Limiet onbekend", geenGps: "Deze browser geeft geen positie.", gpsGeweigerd: "Locatie staat uit voor deze site.",
@@ -33,7 +33,7 @@
       safariSites: "Safari-websites",
       bron: "Kaartdata",
       flitserHier: "Flitser hier", gemeldFlitser: "Gemelde flitser", gemeldGeleden: "gemeld {n} min geleden", gemeldNet: "net gemeld", bevestigd: "bevestigd {n} min geleden", bevestigdNet: "net bevestigd",
-      gemeldOk: "Gemeld, dank je", gemeldSamen: "Bevestigd, dank je", gemeldBezig: "Even...", gemeldTeSnel: "Net al gemeld", gemeldVol: "Genoeg voor vandaag", gemeldBuiten: "Niet in dit land", gemeldGeenPos: "Nog geen locatie", gemeldNetwerk: "Geen verbinding",
+      gemeldOk: "Gemeld, dank je", gemeldSamen: "Bevestigd, dank je", gemeldBezig: "Even...", gemeldTeSnel: "Net al gemeld", gemeldVol: "Genoeg voor vandaag", gemeldBuiten: "Niet in dit land", gemeldGeenPos: "Nog geen locatie", gemeldNetwerk: "Geen verbinding", gemeldProef: "Proefrit: niet verstuurd",
       nogDaar: "Staat hij er nog?", ja: "Ja", nee: "Nee", dank: "Dank je",
       matrixbord: "Matrixbord", advies: "Advies {n}", matrixBron: "Matrixborden", strookDicht: "dicht", strookOpen: "open", strookLinks: "naar links", strookRechts: "naar rechts", strookEinde: "einde", strookLeeg: "leeg", stroken: "Rijstroken",
       motor: "Motorgeluid", sport: "Sportauto", ruimte: "Ruimteschip", kever: "Oude Kever", turbo: "Turbo", turboSchakel: "Turbo op V8 en Sportauto", motorUit: "Uit", motorUitleg: "Zachter bij elke melding, uit als je stilstaat."
@@ -42,7 +42,7 @@
       titel: "Drive assist", uitleg: "Your speed, the speed limit of the road and an alert ahead of speed cameras and average speed checks. With sound, so your eyes stay on the road.",
       start: "Start", klein: "Free, no account. Your position is only sent when you report a camera yourself.", kmh: "km/h",
       flitser: "Speed camera", rood: "Red light camera", flitserRood: "Speed and red light camera", max: "max",
-      traject: "Average speed check", gemiddeld: "average", gem: "avg", nog: "left", over: "in", km: "km",
+      traject: "Average speed check", gemiddeld: "average", gem: "avg", gemVolgt: "avg follows", nog: "left", over: "in", km: "km",
       aan: "camera alerts on", uit: "camera alerts off", buiten: "Other country", gpsZoekt: "GPS searching", gps: "GPS",
       geluidAan: "Sound on", geluidUit: "Sound off", test: "Test sound", scherm: "Full screen", info: "Info",
       laden: "Getting the map", geenLimiet: "Limit unknown", geenGps: "This browser gives no position.", gpsGeweigerd: "Location is off for this site.",
@@ -54,7 +54,7 @@
       safariSites: "Safari Websites",
       bron: "Map data",
       flitserHier: "Camera here", gemeldFlitser: "Reported camera", gemeldGeleden: "reported {n} min ago", gemeldNet: "just reported", bevestigd: "confirmed {n} min ago", bevestigdNet: "just confirmed",
-      gemeldOk: "Reported, thanks", gemeldSamen: "Confirmed, thanks", gemeldBezig: "One moment...", gemeldTeSnel: "Just reported", gemeldVol: "Enough for today", gemeldBuiten: "Not in this country", gemeldGeenPos: "No location yet", gemeldNetwerk: "No connection",
+      gemeldOk: "Reported, thanks", gemeldSamen: "Confirmed, thanks", gemeldBezig: "One moment...", gemeldTeSnel: "Just reported", gemeldVol: "Enough for today", gemeldBuiten: "Not in this country", gemeldGeenPos: "No location yet", gemeldNetwerk: "No connection", gemeldProef: "Test drive: not sent",
       nogDaar: "Is it still there?", ja: "Yes", nee: "No", dank: "Thanks",
       matrixbord: "Overhead sign", advies: "Advised {n}", matrixBron: "Overhead signs", strookDicht: "closed", strookOpen: "open", strookLinks: "move left", strookRechts: "move right", strookEinde: "end", strookLeeg: "blank", stroken: "Lanes",
       motor: "Engine sound", sport: "Sports car", ruimte: "Spaceship", kever: "Old Beetle", turbo: "Turbo", turboSchakel: "Turbo on V8 and Sports car", motorUit: "Off", motorUitleg: "Quieter for every alert, off when you stand still."
@@ -86,6 +86,9 @@
   ]).catch(function (e) { log("data: " + e.message); });
 
   Flitsers.opZeg(function (delen, dringend) { Geluid.zeg(delen, dringend); });
+  // Wat al gezegd is blijft bewaard bij herladen en geldt ook voor een tweede tabblad; in de proefrit
+  // alleen met &geheugen=1.
+  Flitsers.bewaarGezegd(!q.has("sim") || q.get("geheugen") === "1");
   Gemeld.opZeg(function (delen, dringend) { Geluid.zeg(delen, dringend); });
   Gemeld.opLog(log);
   Matrix.opZeg(function (delen, dringend) { Geluid.zeg(delen, dringend); });
@@ -182,8 +185,19 @@
   });
 
   // ---------- Positie ----------
+  // De tijd van een positie komt van de klok van de rit, niet uit pos.timestamp (zie Geo.maakKlok).
+  // In de proefrit loopt de tijd bewust anders (sneller, of op een gekozen uur): daar telt de positie.
+  var ritKlok = G.maakKlok(function () { return window.performance && performance.now ? performance.now() : Date.now(); }, function () { return Date.now(); });
+  var vorigePos = null;
   function opPositie(pos) {
-    var c = pos.coords, t = pos.timestamp || Date.now();
+    var c = pos.coords;
+    // Twee keer dezelfde positie (een tweede luisteraar, of de browser herhaalt hem): een keer.
+    var sleutel = pos.timestamp + "|" + c.latitude + "|" + c.longitude + "|" + c.speed;
+    if (sleutel === vorigePos) return;
+    vorigePos = sleutel;
+    var t = q.has("sim") ? Math.max(pos.timestamp || 0, staat.laatsteT || 0) : ritKlok();
+    staat.laatsteT = t;
+    if (pos.timestamp) staat.klokAf = Math.round((pos.timestamp - Date.now()) / 1000);
     staat.laatsteFix = Date.now(); staat.stilTikken = 0;
     if (staat.gpsKwijt) { staat.gpsKwijt = false; Geluid.zeg(["zacht", "gps_terug"]); }
     if (c.accuracy > 100) { zetTekst(el.gps, T.gpsZoekt); el.gps.className = "chip zoekt"; return; }
@@ -209,7 +223,7 @@
     // Het zware werk vijf keer per seconde, in de tijd van de posities.
     if (t - staat.laatsteStap < 200 && t >= staat.laatsteStap) return;
     staat.laatsteStap = t;
-    var d = new Date(t);
+    var d = datumVan(t);
     staat.tegelKlaar = Kaart.vraagRond(c.latitude, c.longitude, koers, kmh);
     // Even geen weg (kruispunt, GPS-sprong): de vorige 3 s laten staan in plaats van te knipperen.
     var nieuw = Kaart.weg(c.latitude, c.longitude, kmh > 4 ? koers : null, d, kmh);
@@ -226,7 +240,7 @@
       if (!eerder && !staat.flitsersAan) Geluid.zeg(["zacht", "land_uit"]);
       log("land " + (land || "ander land") + ", flitsers " + (staat.flitsersAan ? "aan" : "uit"));
     }
-    var f = Flitsers.stap({ lat: c.latitude, lon: c.longitude, kmh: kmh, koers: koers, t: t }, staat.flitsersAan);
+    var f = Flitsers.stap({ lat: c.latitude, lon: c.longitude, kmh: kmh, koers: koers, t: t, datum: d }, staat.flitsersAan);
     var g = Gemeld.stap({ lat: c.latitude, lon: c.longitude, kmh: kmh, koers: koers, t: t }, staat.flitsersAan);
     f.gemeld = g.gemeld;
     // Matrixborden (alleen in NL): de limiet van het portaal gaat voor de vaste limiet van de kaart.
@@ -236,10 +250,24 @@
     teken(f);
   }
 
+  // Tijd van de dag voor tijdvoorwaarden ("130 @ (19:00-06:00)"). pos.timestamp hoort de tijd van de
+  // meting te zijn, maar niet elke browser vult hem uit dezelfde klok. Wijkt hij meer dan 2 minuten af
+  // van de klok van het toestel, dan telt die klok (in ?debug=1: klokAf in seconden). In de proefrit
+  // lopen de tijden bewust anders (sneller, of op een gekozen uur): daar telt de positie.
+  function datumVan(t) {
+    var af = t - Date.now();
+    if (q.has("sim") || Math.abs(af) <= 120000) return new Date(t);
+    if (!staat.klokGemeld) { staat.klokGemeld = true; log("klok: positie wijkt " + staat.klokAf + " s af, de klok van het toestel telt"); }
+    return new Date();
+  }
   function limietNu(f) {
     var w = staat.weg && staat.weg.limiet;
     if (f && f.matrix && f.matrix.limiet) return f.matrix.limiet;
-    if (f && f.traject && !f.traject.komt && f.traject.limiet) return { v: f.traject.limiet, traject: true };
+    // Trajectcontrole en weg: bij twijfel de laagste (27 okt 2026: het traject toonde 130 waar 100 gold).
+    if (f && f.traject && !f.traject.komt && f.traject.limiet) {
+      if (w && w.v && !w.impliciet && w.v < f.traject.limiet) return w;
+      return { v: f.traject.limiet, traject: true };
+    }
     return w && w.v ? w : null;
   }
   function teHard(kmh, t, f) {
@@ -295,9 +323,12 @@
     // Eén melding tegelijk: actief traject, dan de dichtste camera, dan een traject dat komt.
     var m = null;
     if (f.traject && !f.traject.komt) {
-      var over = f.traject.limiet && f.traject.gem > f.traject.limiet;
-      // Het gemiddelde is waar het om gaat: dat groot, de rest klein.
-      m = { soort: "traject", wat: T.traject, detail: (f.traject.limiet ? T.max + " " + f.traject.limiet + " \u00b7 " : "") + T.nog + " " + String(f.traject.rest).replace(".", taal === "nl" ? "," : ".") + " " + T.km, afstand: T.gem + " " + f.traject.gem, fout: over, d: 0 };
+      var tr = f.traject, gemOk = tr.gem != null;
+      var over = tr.limiet && gemOk && tr.gem > tr.limiet;
+      var nog = T.nog + " " + String(tr.rest).replace(".", taal === "nl" ? "," : ".") + " " + T.km;
+      // Het gemiddelde is waar het om gaat: dat groot, de rest klein. Halverwege aangesloten en nog
+      // te weinig gemeten: geen getal, dan staat de resterende afstand groot.
+      m = { soort: "traject", wat: T.traject, detail: (tr.limiet ? T.max + " " + tr.limiet + " \u00b7 " : "") + (gemOk ? nog : T.gemVolgt), afstand: gemOk ? T.gem + " " + tr.gem : nog, fout: over, d: 0 };
     } else if (f.camera && (!f.gemeld || f.camera.d <= f.gemeld.d)) {
       m = { soort: "camera", wat: f.camera.soort === 1 ? T.rood : f.camera.soort === 2 ? T.flitserRood : T.flitser, detail: f.camera.max ? T.max + " " + f.camera.max : "", afstand: f.camera.d + " m", d: f.camera.d };
     } else if (f.gemeld) {
@@ -318,7 +349,7 @@
       zetTekst(el.mWat, m.wat); zetTekst(el.mDetail, m.detail); zetTekst(el.mAfstand, m.afstand);
     }
     if (el.debug) {
-      el.debug.textContent = JSON.stringify({ matrix: Matrix.staat(), portaal: mx.portaal || null, kmh: Math.round(staat.kmh), koers: staat.koers == null ? null : Math.round(staat.koers), weg: staat.weg, land: staat.land, flitsers: staat.flitsersAan, kaart: stand, kaartStatus: staat.kaartStatus, geluid: Geluid.staat() + (Geluid.klaar() ? ", geladen" : ""), traject: !!Flitsers.actiefTraject(), gemeld: Object.keys(Gemeld.lijst()).length, motor: Motor.staat() }) + "\n" + logRegels.slice(-14).join("\n");
+      el.debug.textContent = JSON.stringify({ matrix: Matrix.staat(), portaal: mx.portaal || null, kmh: Math.round(staat.kmh), koers: staat.koers == null ? null : Math.round(staat.koers), weg: staat.weg, land: staat.land, flitsers: staat.flitsersAan, kaart: stand, kaartStatus: staat.kaartStatus, geluid: Geluid.staat() + (Geluid.klaar() ? ", geladen" : ""), rij: Geluid.rij(), traject: f.traject && !f.traject.komt ? f.traject : !!Flitsers.actiefTraject(), klokAf: staat.klokAf, gemeld: Object.keys(Gemeld.lijst()).length, motor: Motor.staat() }) + "\n" + logRegels.slice(-14).join("\n");
     }
   }
 
@@ -370,7 +401,7 @@
       meldBezig = false;
       log("gemeld: " + (u.ok ? (u.samengevoegd ? "samengevoegd " : "nieuw ") + u.id : u.code));
       if (u.ok) { meldFeedback(u.samengevoegd ? T.gemeldSamen : T.gemeldOk, "ok"); Geluid.zeg(["zacht", "dank_gemeld"]); return; }
-      meldFeedback(u.code === "te_snel" ? T.gemeldTeSnel : u.code === "dag_vol" ? T.gemeldVol : u.code === "buiten" ? T.gemeldBuiten : u.code === "netwerk" ? T.gemeldNetwerk : T.gemeldNetwerk, "nee");
+      meldFeedback(u.code === "te_snel" ? T.gemeldTeSnel : u.code === "dag_vol" ? T.gemeldVol : u.code === "buiten" ? T.gemeldBuiten : u.code === "proefrit" ? T.gemeldProef : u.code === "netwerk" ? T.gemeldNetwerk : T.gemeldNetwerk, "nee");
     });
   });
 

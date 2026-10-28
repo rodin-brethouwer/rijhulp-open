@@ -10,6 +10,10 @@
   var VERVERS_MS = 60000; // per vak elke minuut opnieuw
   var EIGEN_NA_MS = 20 * 60000, EIGEN_TUSSEN_MS = 20 * 60000; // gelijk aan REGELS.eigenNaMin en eigenTussenMin
   var q = new URLSearchParams(location.search);
+  // L6 (review 26 okt): een proefrit speelt een nep-GPS af. Op de echte site gaan melden en stemmen
+  // dan niet naar de server, zodat een gedeelde proefritlink geen meldingen of stemmen maakt;
+  // lokaal (scripts/lokaal.mjs) wel, om twee gebruikers na te spelen.
+  var proefOpLive = q.has("sim") && !/^(localhost|127\.0\.0\.1|\[::1\]|.+\.localhost)$/.test(location.hostname);
   var meldingen = {}; // id -> melding van de server
   var vakken = {}; // vak -> { t, laden }
   var fase = {}; // id -> { fase: "gemeld" | "voorbij", d, min, t }
@@ -124,7 +128,9 @@
         if (d <= grens) {
           var stappen = [500, 300, 150], keuze = null;
           for (var k = 0; k < stappen.length; k++) if (d + 40 >= stappen[k]) { keuze = stappen[k]; break; }
-          zeg(keuze ? ["gong", "gemeld_" + keuze] : ["gong"], true);
+          // Hooguit een keer per plek, ook na herladen of met een tweede tabblad (Flitsers.eenKeer).
+          var mag = !w.Flitsers || !w.Flitsers.eenKeer || w.Flitsers.eenKeer("gemeld", m.lat, m.lon, m.koers, p.t, 240000, 60);
+          if (mag) zeg(keuze ? ["gong", "gemeld_" + keuze] : ["gong"], true);
           fase[id] = st = { fase: "gemeld", t: p.t, d: d, min: d };
         }
       }
@@ -137,6 +143,7 @@
   /** Eén tik op "Flitser hier". p: { lat, lon, koers, acc }. Geeft een belofte met { ok, code }. */
   function meld(p) {
     if (!p) return Promise.resolve({ ok: false, code: "geen_positie" });
+    if (proefOpLive) { log("proefrit: melding niet verstuurd"); return Promise.resolve({ ok: false, code: "proefrit" }); }
     return postMetToestel("api/meldingen", { lat: p.lat, lon: p.lon, koers: p.koers == null ? null : Math.round(p.koers), nauwkeurig: p.acc == null ? null : Math.round(p.acc) })
       .then(function (x) {
         if (x.status === 201 || x.status === 200) {
@@ -152,6 +159,7 @@
   }
   function stem(id, ja) {
     gestemd[id] = Date.now(); opslag(gestemdSleutel, gestemd);
+    if (proefOpLive) { log("proefrit: stem niet verstuurd"); return Promise.resolve({ status: 0, proefrit: true }); }
     return postMetToestel("api/meldingen/" + id + "/stem", { ja: !!ja })
       .then(function (x) {
         if (x.j && x.j.melding) { if (x.j.melding.weg) delete meldingen[id]; else if (meldingen[id]) { x.j.melding.vak = meldingen[id].vak; meldingen[id] = x.j.melding; } }

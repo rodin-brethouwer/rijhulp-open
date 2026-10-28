@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- CSP: scripts alleen van de eigen site. Inline mag wel, omdat sommige hosts (zoals Cloudflare met botdetectie) zelf een inline script in de pagina zetten. Haal 'unsafe-inline' weg als jouw host dat niet doet. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://overpass-api.de https://overpass.kumi.systems; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="color-scheme" content="dark light">
 <title>Over de rijhulp</title>
 <link rel="stylesheet" href="rijhulp.css">
@@ -23,7 +25,7 @@
 <p>Zie je een mobiele controle, tik dan op <strong>Flitser hier</strong>. Een melding verdwijnt na ongeveer drie uur.</p>
 
 <h2>Privacy</h2>
-<p>Je exacte positie blijft in je browser; kaart, borden en meldingen worden per gebied opgehaald. Alleen als je een flitser meldt, gaan die plek en je rijrichting naar de server van deze app. Die bewaart geen IP-adres en geen toestel-id, alleen versleutelde codes daarvan, tegen misbruik. Die codes, meldingen en stemmen worden na ruim een dag gewist. Andere apps zien een melding alleen afgerond op ca. 11 meter, zonder iets over de melder.</p>
+<p>Je exacte positie blijft in je browser; kaart, borden en meldingen worden per gebied opgehaald. Alleen als je een flitser meldt of op een melding antwoordt, weet de server van deze app dat je daar was: bij een melding de plek (op ca. 10 m) en je rijrichting, bij een antwoord welke melding. In de database staat geen IP-adres en geen toestel-id, alleen codes die daarvan met een dagelijks wisselende sleutel zijn gemaakt, tegen misbruik. Die codes, meldingen en stemmen worden na ruim een dag gewist. Andere apps zien een melding alleen afgerond op ca. 11 meter, zonder iets over de melder. Waar geen vooraf gemaakte kaart is, vraagt de app de limieten aan de openbare Overpass-servers van OpenStreetMap (overpass-api.de, met overpass.kumi.systems als reserve), voor het gebied rond je positie.</p>
 
 <h2>Bronnen</h2>
 <p>Kaart, limieten, flitspalen en trajecten: &copy; <a href="https://www.openstreetmap.org/copyright" rel="noopener">OpenStreetMap-bijdragers</a>, onder de <a href="https://opendatacommons.org/licenses/odbl/" rel="noopener">ODbL</a>. De afgeleide data op deze site (<a href="data/">data/</a>, <a href="kaart/index.json">kaart/</a>) valt onder dezelfde licentie. Matrixborden: <a href="https://www.ndw.nu" rel="noopener">NDW</a>, <a href="https://creativecommons.org/publicdomain/zero/1.0/deed.nl" rel="noopener">CC0 1.0</a>. Stem: [dienst]. Iets fout? <a href="https://www.openstreetmap.org" rel="noopener">Pas het aan op openstreetmap.org</a>.</p>

@@ -52,7 +52,7 @@ buurvakken waar de auto binnen enkele kilometers in rijdt.
 
 | Veld | Type | Regel |
 |---|---|---|
-| `id` | string, 1 tot 64 tekens | uniek binnen de app; de sleutel over alle apps heen is `<app>:<id>` |
+| `id` | string, 1 tot 64 tekens uit `A-Z a-z 0-9 _ -` | uniek binnen de app; de sleutel over alle apps heen is `<app>:<id>` |
 | `soort` | string | in 0.1 alleen `mobiele_flitser`; onbekende soorten MOET een lezer overslaan, niet de hele feed weigeren |
 | `lat`, `lon` | getal, WGS84 | MOET afgerond zijn op 4 decimalen (ca. 11 m); meer precisie MAG NIET |
 | `koers` | geheel getal 0 tot 359, of `null` | de rijrichting van de melder in graden (0 = noord, met de klok mee); `null` als onbekend |
@@ -117,7 +117,11 @@ gebruikt ze, `REGELS` in `referentie/server/server.mjs`):
   De melder zelf stemt pas als zijn melding minstens 20 minuten
   oud is; zijn nee haalt zijn eigen melding meteen weg.
 - Een lezer telt de stemmen van een melding op uit de eigen feed van de melder plus de `stemmen` uit
-  de andere feeds die hij vertrouwt.
+  de andere feeds die hij vertrouwt. Per andere app telt hooguit 1 ja en 1 nee per melding, en een
+  nee uit een andere feed haalt een melding nooit in zijn eentje weg (alleen samen met nee uit de
+  feed van de melder of uit nog een app). Zo kan geen enkele deelnemer andermans meldingen opblazen
+  of wegstemmen.
+- Een lezer neemt van een melding alleen de velden uit hoofdstuk 3 over en toont ze nooit als HTML.
 
 Een lezer MAG NIET waarschuwen voor een melding waarvan `verloopt` voorbij is, ook niet als hij
 hem nog in een cache heeft.
@@ -136,6 +140,13 @@ Elke feed MOET ondertekend zijn met Ed25519.
   eigen lijst. Daar is geen centrale beslissing voor nodig, en niemand kan je dwingen een feed te lezen.
 - Een nieuwe sleutel gaat via een pull request op `deelnemers.json`. Een oude sleutel MAG een korte
   tijd naast de nieuwe staan (`publieke_sleutel_vorige`).
+- Een deelnemer met `"ingetrokken": true` (gelekte sleutel, of de app stopt) MOET een lezer niet meer
+  lezen.
+- Een lezer HOORT `deelnemers.json` vast te pinnen op een commit die hij zelf heeft nagekeken, in
+  plaats van de lijst live van `main` te lezen: wie op `main` mag mergen, bepaalt anders wie hij
+  vertrouwt.
+- Een lezer haalt een feed op met een time-out (de hulpmiddelen: 5 s) en leest hooguit 256 kB; een
+  grotere body breekt hij af in plaats van hem eerst helemaal in te lezen.
 
 Hulpmiddelen: `protocol/feed.mjs` (controleren en keuren), `referentie/scripts/maak-sleutel.mjs`
 (sleutelpaar maken; de geheime sleutel komt in een bestand buiten de repo en nooit op het scherm).
